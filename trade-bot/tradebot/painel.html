@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel do trade-bot</title>
+<style>
+:root {
+  --bg: #f6f5f1; --card: #ffffff; --ink: #1b1d1f; --muted: #62676d; --line: #e3e1da;
+  --accent: #1f5f4a; --accent-ink: #ffffff; --accent-soft: #e4efe9;
+  --warn: #8a5a00; --warn-soft: #fbf0d9; --bad: #a3271d; --bad-soft: #f9e3e0;
+  --good: #1f6f3f; --good-soft: #e1f2e6; --info-soft: #e8eef7; --info: #2b4f86;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131517; --card: #1c1f22; --ink: #eceae5; --muted: #a2a7ad; --line: #2e3237;
+    --accent: #5fc39d; --accent-ink: #0e1a15; --accent-soft: #1d2e27;
+    --warn: #e7b85a; --warn-soft: #2e2615; --bad: #f08a7e; --bad-soft: #35201d;
+    --good: #74d39a; --good-soft: #1a2e21; --info-soft: #1c2533; --info: #8fb2ea;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 28px 16px 80px; }
+header { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+h1 { font-size: 26px; margin: 0; letter-spacing: -0.01em; }
+.sub { color: var(--muted); margin: 4px 0 20px; }
+.clock { text-align: right; color: var(--muted); font-size: 14px; }
+.clock b { color: var(--ink); font-size: 18px; font-variant-numeric: tabular-nums; }
+.warning { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 10px 14px; font-size: 14px; margin-bottom: 18px; }
+.step { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; }
+.step-head { display: flex; align-items: center; gap: 12px; }
+.num { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  font-weight: 700; font-size: 14px; background: var(--line); color: var(--muted); }
+.step.done .num { background: var(--accent); color: var(--accent-ink); }
+.step.done .num::after { content: "✓"; }
+.step.done .num span { display: none; }
+h2 { font-size: 18px; margin: 0; }
+.step-body { margin: 12px 0 0 42px; }
+p { margin: 6px 0; }
+.muted { color: var(--muted); font-size: 14px; }
+.checks { list-style: none; padding: 0; margin: 0; }
+.checks li { padding: 2px 0; }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+.choice { text-align: left; border: 2px solid var(--line); background: transparent; color: inherit; border-radius: 12px;
+  padding: 12px 14px; cursor: pointer; font: inherit; }
+.choice:hover:not(:disabled) { border-color: var(--muted); }
+.choice.on { border-color: var(--accent); background: var(--accent-soft); }
+.choice b { display: block; margin-bottom: 2px; }
+.choice span { color: var(--muted); font-size: 14px; }
+.box { background: var(--bg); border-radius: 10px; padding: 12px 14px; margin-top: 12px; }
+ol.how { margin: 4px 0 10px; padding-left: 20px; }
+ol.how li { margin: 3px 0; }
+label { display: block; font-size: 14px; font-weight: 600; margin: 10px 0 4px; }
+input[type=text], input[type=password] { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--card); color: var(--ink); font: 15px var(--mono); }
+input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn { border: 0; border-radius: 10px; padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink); }
+.btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.btn.danger { background: var(--bad); color: #fff; }
+.btn.big { font-size: 18px; padding: 14px 26px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.msg { font-size: 14px; margin-top: 8px; min-height: 1em; }
+.msg.err { color: var(--bad); } .msg.ok { color: var(--good); }
+.limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; }
+.limit { background: var(--bg); border-radius: 8px; padding: 8px 10px; font-size: 13px; color: var(--muted); }
+.limit b { display: block; color: var(--ink); font-size: 16px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.pill.on { background: var(--good-soft); color: var(--good); }
+.pill.off { background: var(--line); color: var(--muted); }
+.pill.kill { background: var(--bad-soft); color: var(--bad); }
+.pill.on::before { animation: pulse 1.6s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 12px; }
+.card { background: var(--bg); border-radius: 10px; padding: 10px 12px; }
+.card small { color: var(--muted); font-size: 13px; }
+.card b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.pos { color: var(--good); } .neg { color: var(--bad); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
+th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; }
+.feed { list-style: none; padding: 0; margin: 10px 0 0; max-height: 360px; overflow: auto; }
+.feed li { display: grid; grid-template-columns: 48px 1fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.feed time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.tag { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 6px; border-radius: 4px; margin-right: 6px; background: var(--line); color: var(--muted); }
+.tag.ordem, .tag.aprovado { background: var(--good-soft); color: var(--good); }
+.tag.vetado, .tag.bloqueado { background: var(--warn-soft); color: var(--warn); }
+.tag.erro, .tag.zerar { background: var(--bad-soft); color: var(--bad); }
+.tag.sinal { background: var(--info-soft); color: var(--info); }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+pre { background: var(--bg); border-radius: 8px; padding: 10px; font: 12px/1.45 var(--mono); max-height: 220px; overflow: auto; white-space: pre-wrap; }
+.hidden { display: none !important; }
+@media (max-width: 560px) {
+  .choices { grid-template-columns: 1fr; }
+  .step-body { margin-left: 0; }
+  .clock { text-align: left; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Painel do trade-bot</h1>
+    </div>
+    <div class="clock">Nova York agora<br><b id="nyTime">--:--</b> <span id="mktPill" class="pill off">…</span></div>
+  </header>
+  <p class="sub">Siga os passos de cima para baixo. Este painel só liga o modo <b>sim</b> (treino) e o <b>paper</b> (dinheiro fictício). Dinheiro real continua só pela linha de comando.</p>
+  <div class="warning">Day trade dá prejuízo para a maioria das pessoas. O robô não garante lucro. Use o paper por pelo menos 20 pregões antes de pensar em dinheiro real.</div>
+
+  <section class="step done" id="s1">
+    <div class="step-head"><div class="num"><span>1</span></div><h2>Seu computador</h2></div>
+    <div class="step-body">
+      <ul class="checks">
+        <li>✓ Python <span id="pyVer"></span> instalado</li>
+        <li>✓ Fuso horário de Nova York funcionando</li>
+        <li>✓ Robô versão <span id="tbVer"></span> pronto</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step" id="s2">
+    <div class="step-head"><div class="num"><span>2</span></div><h2>Como você quer rodar?</h2></div>
+    <div class="step-body">
+      <div class="choices">
+        <button class="choice" id="pickSim" type="button"><b>Treino, sem conta</b><span>Cotações de verdade (Yahoo) e corretora de mentira. Nenhuma ordem sai do seu computador.</span></button>
+        <button class="choice" id="pickPaper" type="button"><b>Conta paper da Alpaca</b><span>Corretora de verdade com dinheiro fictício. É o teste sério antes de qualquer coisa.</span></button>
+      </div>
+      <div id="paperBox" class="box hidden">
+        <p id="keysOk" class="msg ok hidden"></p>
+        <div id="keysForm">
+          <b>Para o paper você precisa de duas chaves da Alpaca (grátis):</b>
+          <ol class="how">
+            <li>Abra <a href="https://alpaca.markets" target="_blank" rel="noopener">alpaca.markets</a> e crie a conta com seu e-mail (botão <i>Sign Up</i>).</li>
+            <li>Entre no painel da Alpaca. No canto superior esquerdo, confira que está na conta <b>Paper</b>.</li>
+            <li>Na página inicial, ache o quadro <b>API Keys</b> e clique em <b>Generate New Keys</b>.</li>
+            <li>Copie as duas chaves e cole aqui embaixo. A <i>Secret Key</i> só aparece uma vez.</li>
+          </ol>
+          <label for="keyId">API Key ID (começa com PK)</label>
+          <input type="text" id="keyId" autocomplete="off" spellcheck="false" placeholder="PK…">
+          <label for="keySecret">Secret Key</label>
+          <input type="password" id="keySecret" autocomplete="off" spellcheck="false">
+          <div class="row"><button class="btn" id="saveKeys" type="button">Testar e salvar</button>
+            <span class="muted">As chaves ficam só no arquivo <code>trade-bot/.env</code>, no seu computador.</span></div>
+        </div>
+        <p class="msg" id="keysMsg"></p>
+      </div>
+      <p class="msg" id="modeMsg"></p>
+    </div>
+  </section>
+
+  <section class="step" id="s3">
+    <div class="step-head"><div class="num"><span>3</span></div><h2>Quais ações o robô vai olhar?</h2></div>
+    <div class="step-body">
+      <label for="watch">Códigos das ações dos EUA, separados por vírgula</label>
+      <input type="text" id="watch" spellcheck="false">
+      <div class="row"><button class="btn secondary" id="saveWatch" type="button">Salvar lista</button></div>
+      <p class="msg" id="watchMsg"></p>
+      <p class="muted">Limites de risco atuais (para mudar, edite <code>trade-bot/config.json</code>):</p>
+      <div class="limits" id="limits"></div>
+    </div>
+  </section>
+
+  <section class="step" id="s4">
+    <div class="step-head"><div class="num"><span>4</span></div><h2>Ligar o robô</h2></div>
+    <div class="step-body">
+      <p id="windowTxt" class="muted"></p>
+      <div class="row">
+        <button class="btn big" id="startBtn" type="button">Ligar robô</button>
+        <button class="btn big secondary hidden" id="stopBtn" type="button">Desligar</button>
+        <span id="robotPill" class="pill off">desligado</span>
+      </div>
+      <p class="msg" id="runMsg"></p>
+      <p class="muted">Deixe esta página e a janela preta do painel abertas enquanto o robô roda. Fechar a página não desliga o robô; fechar a janela preta desliga. As ordens já enviadas continuam com stop e alvo na corretora.</p>
+    </div>
+  </section>
+
+  <section class="step" id="s5">
+    <div class="step-head"><div class="num"><span>5</span></div><h2>Acompanhar</h2></div>
+    <div class="step-body">
+      <p id="lastStatus"><b>Ainda sem ciclos.</b> Ligue o robô no passo 4.</p>
+      <div class="cards" id="acctCards"></div>
+      <p class="msg err" id="acctErr"></p>
+      <table id="posTable" class="hidden"><thead><tr><th>Ação</th><th>Qtd</th><th>Preço médio</th><th>Resultado</th></tr></thead><tbody></tbody></table>
+      <h3 style="font-size:15px;margin:18px 0 0">O que aconteceu hoje</h3>
+      <ul class="feed" id="feed"></ul>
+      <p class="muted" id="feedEmpty">Nada ainda hoje. Os sinais, vetos e ordens vão aparecer aqui.</p>
+      <div class="row">
+        <button class="btn secondary" id="flattenBtn" type="button">Zerar posições agora</button>
+        <button class="btn danger" id="killBtn" type="button">Emergência: zerar e bloquear</button>
+        <span id="killPill" class="pill kill hidden">kill switch ligado</span>
+      </div>
+      <p class="msg" id="ctlMsg"></p>
+      <details><summary>Saída técnica do robô</summary><pre id="lines">(vazio)</pre></details>
+    </div>
+  </section>
+</main>
+<script>
+const TOKEN = "__PAINEL_TOKEN__";
+const $ = (id) => document.getElementById(id);
+let S = null, pendingMode = null, watchDirty = false;
+
+async function api(path, body) {
+  const opt = { headers: { "X-Painel-Token": TOKEN } };
+  if (body !== undefined) { opt.method = "POST"; opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({ error: "resposta inválida" }));
+  if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+  return j;
+}
+function msg(id, text, ok) { const el = $(id); el.textContent = text || ""; el.className = "msg " + (text ? (ok ? "ok" : "err") : ""); }
+function local(iso) { return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); }
+function usd(v) { return "US$ " + Number(v).toLocaleString("pt-BR"); }
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function render() {
+  const s = S, running = s.robot.running;
+  $("pyVer").textContent = s.python; $("tbVer").textContent = s.version;
+  $("nyTime").textContent = s.market.ny_time;
+  const mp = $("mktPill");
+  mp.textContent = s.market.is_open ? "bolsa aberta" : "bolsa fechada";
+  mp.className = "pill " + (s.market.is_open ? "on" : "off");
+
+  // passo 2
+  const mode = pendingMode || s.mode;
+  $("pickSim").classList.toggle("on", mode === "sim");
+  $("pickPaper").classList.toggle("on", mode === "paper");
+  $("pickSim").disabled = $("pickPaper").disabled = running;
+  $("paperBox").classList.toggle("hidden", mode !== "paper");
+  $("keysOk").classList.toggle("hidden", !s.keys.saved);
+  $("keysOk").textContent = s.keys.saved ? "✓ Chaves paper salvas (Key ID " + s.keys.key_hint + "). Para trocar, cole novas abaixo." : "";
+  const modeOk = (s.mode === "sim") || (s.mode === "paper" && s.keys.saved);
+  $("s2").classList.toggle("done", modeOk && !pendingMode);
+  if (s.mode !== "sim" && s.mode !== "paper") msg("modeMsg", "O config.json está em modo " + s.mode + ". Escolha sim ou paper acima.");
+
+  // passo 3
+  if (!watchDirty && document.activeElement !== $("watch")) $("watch").value = s.watchlist.join(", ");
+  $("watch").disabled = $("saveWatch").disabled = running;
+  $("s3").classList.toggle("done", s.watchlist.length > 0);
+  const L = s.limits;
+  $("limits").innerHTML = [
+    ["Perda máx. por operação", usd(L.max_loss_per_trade_usd)],
+    ["Perda máx. no dia", usd(L.max_daily_loss_usd)],
+    ["Operações por dia", L.max_trades_per_day],
+    ["Posições ao mesmo tempo", L.max_open_positions],
+    ["Valor máx. por ordem", usd(L.max_order_usd)],
+  ].map(([k, v]) => `<div class="limit">${k}<b>${esc(v)}</b></div>`).join("");
+
+  // passo 4
+  const m = s.market;
+  $("windowTxt").innerHTML = `O pregão de Nova York vai das <b>${local(m.open_at)}</b> às <b>${local(m.close_at)}</b> no seu horário. ` +
+    `O robô só abre operações entre <b>${local(m.entries_from)}</b> e <b>${local(m.entries_to)}</b> e zera tudo às <b>${local(m.flat_by)}</b>. ` +
+    `Fora disso ele fica ligado, só esperando.` + (m.weekday >= 5 ? " <b>Hoje é fim de semana: a bolsa não abre.</b>" : "");
+  $("startBtn").classList.toggle("hidden", running);
+  $("stopBtn").classList.toggle("hidden", !running);
+  $("startBtn").disabled = !modeOk || !!pendingMode;
+  const rp = $("robotPill");
+  rp.textContent = running ? "ligado em modo " + s.mode : "desligado";
+  rp.className = "pill " + (running ? "on" : "off");
+  $("s4").classList.toggle("done", running);
+
+  // passo 5
+  const r = s.robot;
+  if (r.last_status) $("lastStatus").innerHTML = `<b>Último ciclo (${esc(r.last_time)} NY):</b> ${esc(r.last_status_pt || r.last_status)}`;
+  else $("lastStatus").innerHTML = running ? "<b>Ligado.</b> O primeiro ciclo aparece em até um minuto." : "<b>Ainda sem ciclos.</b> Ligue o robô no passo 4.";
+  const a = s.account;
+  if (a) {
+    const cls = a.day_pnl_raw > 0 ? "pos" : a.day_pnl_raw < 0 ? "neg" : "";
+    $("acctCards").innerHTML = `<div class="card"><small>Patrimônio (paper)</small><b>${esc(a.equity)}</b></div>` +
+      `<div class="card"><small>Resultado de hoje</small><b class="${cls}">${esc(a.day_pnl)}</b></div>` +
+      `<div class="card"><small>Posições abertas</small><b>${a.positions.length}</b></div>`;
+    const tb = $("posTable");
+    tb.classList.toggle("hidden", !a.positions.length);
+    tb.querySelector("tbody").innerHTML = a.positions.map((p) =>
+      `<tr><td><b>${esc(p.symbol)}</b></td><td>${esc(p.qty)}</td><td>${esc(p.avg)}</td><td class="${p.pnl_raw >= 0 ? "pos" : "neg"}">${esc(p.pnl)}</td></tr>`).join("");
+  } else {
+    $("acctCards").innerHTML = s.mode === "sim"
+      ? `<div class="card"><small>Modo treino</small><b>Conta fictícia</b></div>` : "";
+    $("posTable").classList.add("hidden");
+  }
+  $("acctErr").textContent = s.account_error ? "Não consegui ler a conta: " + s.account_error : "";
+  $("feed").innerHTML = s.events.map((e) =>
+    `<li><time>${esc(e.time)}</time><div><span class="tag ${esc(e.kind)}">${esc(e.kind)}</span>${esc(e.text)}</div></li>`).join("");
+  $("feedEmpty").classList.toggle("hidden", s.events.length > 0);
+  $("flattenBtn").classList.toggle("hidden", s.mode !== "paper");
+  $("killPill").classList.toggle("hidden", !s.killed);
+  $("killBtn").textContent = s.killed ? "Desligar o kill switch" : "Emergência: zerar e bloquear";
+  $("killBtn").className = "btn " + (s.killed ? "secondary" : "danger");
+  $("lines").textContent = r.lines.length ? r.lines.join("\n") : "(vazio)";
+}
+
+async function refresh() {
+  try { S = await api("/api/status"); render(); }
+  catch (e) { $("lastStatus").innerHTML = "<b>Sem contato com o painel.</b> A janela preta do painel ainda está aberta? (" + esc(e.message) + ")"; }
+}
+
+async function setup(mode) {
+  try { await api("/api/setup", { mode, watchlist: $("watch").value }); pendingMode = null; msg("modeMsg", ""); }
+  catch (e) { msg("modeMsg", e.message); }
+  await refresh();
+}
+
+$("pickSim").onclick = () => { pendingMode = null; setup("sim"); };
+$("pickPaper").onclick = () => {
+  if (S && S.keys.saved) { pendingMode = null; setup("paper"); }
+  else { pendingMode = "paper"; render(); $("keyId").focus(); }
+};
+$("saveKeys").onclick = async () => {
+  const b = $("saveKeys"); b.disabled = true; msg("keysMsg", "Testando com a Alpaca…", true);
+  try {
+    const r = await api("/api/keys", { key: $("keyId").value, secret: $("keySecret").value });
+    $("keyId").value = ""; $("keySecret").value = "";
+    msg("keysMsg", "Conectado! Conta paper com " + r.equity + ".", true);
+    pendingMode = null; await setup("paper");
+  } catch (e) { msg("keysMsg", e.message); }
+  b.disabled = false;
+};
+$("watch").oninput = () => { watchDirty = true; };
+$("saveWatch").onclick = async () => {
+  try {
+    const r = await api("/api/setup", { mode: S.mode, watchlist: $("watch").value });
+    watchDirty = false; msg("watchMsg", "Lista salva: " + r.watchlist.join(", "), true);
+  } catch (e) { msg("watchMsg", e.message); }
+  await refresh();
+};
+$("startBtn").onclick = async () => {
+  try { await api("/api/start", {}); msg("runMsg", "Robô ligado.", true); } catch (e) { msg("runMsg", e.message); }
+  await refresh();
+};
+$("stopBtn").onclick = async () => {
+  if (!confirm("Desligar o robô? Ordens já enviadas continuam com stop e alvo na corretora.")) return;
+  try { await api("/api/stop", {}); msg("runMsg", "Robô desligado.", true); } catch (e) { msg("runMsg", e.message); }
+  await refresh();
+};
+$("flattenBtn").onclick = async () => {
+  if (!confirm("Cancelar todas as ordens e vender todas as posições da conta paper agora?")) return;
+  try { await api("/api/flatten", {}); msg("ctlMsg", "Pedido de zerar enviado à Alpaca.", true); } catch (e) { msg("ctlMsg", e.message); }
+  await refresh();
+};
+$("killBtn").onclick = async () => {
+  const on = !(S && S.killed);
+  if (on && !confirm("Ligar o kill switch? O robô zera tudo e não abre nada até você desligar.")) return;
+  try { await api("/api/kill", { on }); msg("ctlMsg", on ? "Kill switch ligado." : "Kill switch desligado.", true); } catch (e) { msg("ctlMsg", e.message); }
+  await refresh();
+};
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

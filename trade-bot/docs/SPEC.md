@@ -1,4 +1,4 @@
-# SPEC — trade-bot v0.1.1
+# SPEC — trade-bot v0.2.0
 
 Status: **Aprovada para implementação** · Dono: Alexandre Cappa · Última revisão: 2026-10-28
 
@@ -14,7 +14,7 @@ Nenhum código foi copiado: a implementação é própria.
 
 - B3 / MetaTrader 5, opções, venda a descoberto (short), margem, cripto.
 - Varredura das ~6.000 ações dos EUA. A v0.1 opera uma **watchlist** definida no config.
-- Interface gráfica. A operação é por linha de comando e por logs.
+- Interface gráfica além do painel local (§7). Nada de app instalado, servidor na internet ou acesso remoto.
 
 ## 3. Requisitos funcionais
 
@@ -43,10 +43,13 @@ Nenhum código foi copiado: a implementação é própria.
 | SEC-04 | No modo live, `max_daily_loss_usd` não pode passar de 5% do patrimônio, e `max_loss_per_trade_usd` não pode passar de 2%. Se passar, o robô não abre posições. | `test_risk` |
 | SEC-05 | Kill switch: o arquivo `state/KILL` zera tudo e bloqueia novas entradas até ser removido. | `test_engine` |
 | SEC-06 | Erro de rede ou de dados nunca abre posição. Na dúvida, o robô não opera. | `test_engine` |
+| SEC-07 | O painel (§7) só trabalha com `sim` e `paper`: não grava `"mode": "live"`, não aceita chaves live (prefixo `AK`), recusa ligar se o config estiver em `live` e remove `ALPACA_LIVE_*` e `TRADEBOT_LIVE_CONFIRM` do ambiente do robô que ele liga. O modo live continua só pela CLI, com SEC-02. | `test_painel` |
+| SEC-08 | O painel escuta só em `127.0.0.1`, confere o cabeçalho `Host` (contra DNS rebinding) e exige um token aleatório, gerado a cada início, em toda chamada `/api/*` (contra CSRF). | `test_painel` |
+| SEC-09 | As chaves digitadas no painel são gravadas só em `trade-bot/.env` (ignorado pelo git) e nunca voltam ao navegador. O painel mostra apenas os 4 últimos caracteres do Key ID. | `test_painel` |
 
 ## 5. Requisitos não funcionais
 
-- Python ≥ 3.10, **só biblioteca padrão** (sem `pip install`).
+- Python ≥ 3.10, **só biblioteca padrão** (sem `pip install`). Exceção: no Windows o Python não traz a base de fusos horários, então é preciso `pip install tzdata`. O atalho `Abrir painel.bat` faz isso sozinho.
 - Testes 100% offline, com dados sintéticos e HTTP falso.
 - Harness (`scripts/harness.sh`) roda compilação, testes e backtest de fumaça. É o portão de liberação (CI no GitHub Actions).
 - Versionamento SemVer em `VERSION` e `CHANGELOG.md`.
@@ -57,3 +60,15 @@ Nenhum código foi copiado: a implementação é própria.
 2. No mínimo **20 pregões em paper** com o journal revisado.
 3. Backtest com filtro da Máquina do Tempo com expectativa (R médio) > 0 na watchlist escolhida.
 4. Limites do config revisados pelo dono.
+
+## 7. Painel local (passo a passo)
+
+Objetivo: quem nunca usou terminal consegue ligar o robô em `sim` ou `paper` e acompanhar o dia.
+Abre com `python -m tradebot painel` ou com dois cliques em `Abrir painel.bat` (Windows).
+
+| ID | Requisito | Teste |
+| --- | --- | --- |
+| REQ-13 | O painel é uma página local (servidor da biblioteca padrão) com o passo a passo: (1) verificar o computador, (2) escolher o modo (`sim` sem conta ou `paper` com chaves), (3) escolher as ações, (4) ligar e (5) acompanhar. Se `config.json` não existir, ele é criado a partir de `config.example.json`. | `test_painel` |
+| REQ-14 | Antes de salvar as chaves paper, o painel consulta a conta na Alpaca e mostra o resultado em português (patrimônio, ou o motivo da falha). Chave que não funciona não é salva. | `test_painel` |
+| REQ-15 | "Ligar" executa o mesmo `python -m tradebot run` em um processo separado; "Desligar" encerra esse processo. As ordens bracket já enviadas continuam valendo na corretora. O painel também oferece "Zerar agora" (paper) e o kill switch (SEC-05). | `test_painel` |
+| REQ-16 | O acompanhamento mostra o horário de Nova York e a janela de entradas no horário local, a situação do pregão, o último status do ciclo traduzido, a conta e as posições (paper) e os eventos do journal de hoje em linguagem simples. | `test_painel` |

@@ -45,7 +45,14 @@ def main(argv=None):
     b = sub.add_parser("backtest", help="backtest walk-forward nos últimos ~60 dias")
     b.add_argument("symbols", nargs="*")
     b.add_argument("--no-timemachine", action="store_true")
+    pn = sub.add_parser("painel", help="abre o painel no navegador (passo a passo para sim e paper)")
+    pn.add_argument("--port", type=int, default=8765)
+    pn.add_argument("--no-browser", action="store_true")
     a = ap.parse_args(argv)
+
+    if a.cmd == "painel":                       # REQ-13: funciona mesmo sem config.json
+        from . import painel
+        return painel.serve(a.config, port=a.port, open_browser=not a.no_browser)
 
     try:
         cfg = load_config(a.config)

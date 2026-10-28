@@ -19,9 +19,29 @@ Robô de day trade **automático** para ações dos EUA na Alpaca. Requisitos em
 
 Tudo fica registrado em `state/journal-AAAA-MM-DD.jsonl`.
 
-## Instalação
+## Jeito mais simples: o painel
 
-Só precisa de Python ≥ 3.10, sem `pip install`.
+No Windows, dê **dois cliques em `Abrir painel.bat`** (nesta pasta). Em qualquer sistema:
+
+```bash
+cd trade-bot
+python -m tradebot painel
+```
+
+O navegador abre em `http://127.0.0.1:8765` com o passo a passo:
+
+1. **Seu computador**: confere Python e fuso horário.
+2. **Como rodar**: *Treino, sem conta* (`sim`, cotações do Yahoo e corretora de mentira) ou *Conta paper da Alpaca* (cola as chaves, o painel testa e salva em `.env`).
+3. **Ações**: a lista que o robô vai olhar.
+4. **Ligar**: liga o mesmo `tradebot run`, mostrando a janela de entradas no seu horário.
+5. **Acompanhar**: conta, posições, sinais, vetos da Máquina do Tempo, ordens, "zerar agora" e kill switch.
+
+Deixe a janela preta aberta: fechá-la desliga o robô (as ordens já enviadas continuam com stop e alvo na corretora).
+O painel **não** liga o modo live. Dinheiro real continua só pela linha de comando, abaixo.
+
+## Instalação (linha de comando)
+
+Só precisa de Python ≥ 3.10. No Windows, rode uma vez `python -m pip install --user tzdata` (fuso horário de Nova York).
 
 ```bash
 cd trade-bot
@@ -43,6 +63,7 @@ python3 -m tradebot status              # conta e estado do dia
 python3 -m tradebot run                 # liga o robô (Ctrl+C para parar)
 python3 -m tradebot kill on             # EMERGÊNCIA: zera tudo e bloqueia entradas
 python3 -m tradebot kill off
+python3 -m tradebot painel              # passo a passo no navegador
 python3 -m tradebot flatten             # zera agora
 ```
 
