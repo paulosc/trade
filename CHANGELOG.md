@@ -7,6 +7,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) · Versões
 ### Adicionado
 - `trade-bot` v0.2.0: painel local no navegador (`python -m tradebot painel` ou dois cliques em `trade-bot/Abrir painel.bat`) com passo a passo para ligar o robô em `sim` (sem conta) ou `paper` (Alpaca), testar as chaves, escolher as ações, ligar/desligar, zerar, kill switch e acompanhar o dia em português (REQ-13..16).
 - Travas do painel: só `sim`/`paper`, só `127.0.0.1`, token por sessão e chaves só em `trade-bot/.env` (SEC-07..09). ADR 0002.
+- Ícone do painel (aba do navegador e título).
 
 ### Alterado
 - SPEC: no Windows é preciso `pip install tzdata` (o atalho do painel instala sozinho).

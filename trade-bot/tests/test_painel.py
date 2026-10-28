@@ -250,6 +250,7 @@ class TestHttp(Base):
         code, body = self.req("/")
         self.assertEqual(code, 200)
         self.assertIn(self.p.token, body)
+        self.assertIn('rel="icon"', body)
         for step in ("Seu computador", "Como você quer rodar?", "Ligar o robô", "Acompanhar"):
             self.assertIn(step, body)
 
