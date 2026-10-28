@@ -116,18 +116,35 @@ class DataSource:
                        or env.get("ALPACA_LIVE_SECRET_KEY"))
         if self.kind == "alpaca" and not (self.key and self.secret):
             self.kind = "yahoo"
+        self._hist = {}                     # REQ-18: símbolo -> (data NY, sessões anteriores)
+
+    def _fetch(self, symbol, days, now):
+        bm = self.cfg.get("bar_minutes", 5)
+        if self.kind == "alpaca":
+            return fetch_alpaca(symbol, self.key, self.secret, days=days, bar_minutes=bm,
+                                feed=self.cfg.get("alpaca_feed", "iex"), get=self.get, now=now)
+        return fetch_yahoo(symbol, days=min(days, 60), bar_minutes=bm, get=self.get)
 
     def sessions(self, symbol, now=None):
+        """Sessões anteriores (baixadas 1x por dia) + a sessão de hoje (buscada a cada chamada). REQ-18."""
+        now = now or clock.now_utc()
         bm = self.cfg.get("bar_minutes", 5)
-        days = self.cfg.get("timemachine", {}).get("lookback_sessions", 59) + 1
-        if self.kind == "alpaca":
-            bars = fetch_alpaca(symbol, self.key, self.secret, days=days, bar_minutes=bm,
-                                feed=self.cfg.get("alpaca_feed", "iex"), get=self.get, now=now)
-        else:
-            bars = fetch_yahoo(symbol, days=min(days, 60), bar_minutes=bm, get=self.get)
-        if not bars:
-            raise DataError("sem barras para %s" % symbol)
-        return group_sessions(bars, bm)
+        today = clock.ny_date(now)
+        cached = self._hist.get(symbol)
+        if cached is None or cached[0] != today:
+            days = self.cfg.get("timemachine", {}).get("lookback_sessions", 59) + 1
+            bars = self._fetch(symbol, days, now)
+            if not bars:
+                raise DataError("sem barras para %s" % symbol)
+            grouped = group_sessions(bars, bm)
+            past = OrderedDict((d, s) for d, s in grouped.items() if d < today)
+            self._hist[symbol] = (today, past)
+            return grouped
+        out = OrderedDict(cached[1])
+        recent = group_sessions(self._fetch(symbol, 1, now), bm)   # só a janela curta
+        if today in recent:
+            out[today] = recent[today]
+        return out
 
 
 def closed_only(session, now_ny, bar_minutes):

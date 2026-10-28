@@ -1,4 +1,4 @@
-# SPEC — trade-bot v0.3.0
+# SPEC — trade-bot v0.4.0
 
 Status: **Aprovada para implementação** · Dono: Alexandre Cappa · Última revisão: 2026-10-28
 
@@ -32,6 +32,7 @@ Nenhum código foi copiado: a implementação é própria.
 | REQ-10 | Toda decisão (sinal, bloqueio, ordem, erro) é gravada em `state/journal-AAAA-MM-DD.jsonl`. | `test_engine` |
 | REQ-12 | O preço limite da entrada = sinal + tolerância, onde a tolerância é `max_slippage_pct` do preço, **limitada a 20% do risco**. O alvo é recalculado a partir do limite para manter o R:R. | `test_engine_backtest` |
 | REQ-11 | Backtest walk-forward da mesma regra (com e sem o filtro da Máquina do Tempo), mostrando nº de trades, taxa de acerto, R médio, R total e drawdown máximo em R. | `test_backtest` |
+| REQ-18 | O ciclo precisa caber no minuto mesmo com 20 ações: o histórico das sessões anteriores (para a Máquina do Tempo) é baixado uma vez por dia e por ação e guardado em memória; a cada ciclo busca-se só a janela curta com as barras de hoje. Virou o dia em Nova York, o histórico é baixado de novo. Se a busca curta falhar, o ciclo trata o erro como hoje (SEC-06). | `test_broker_data` |
 
 ## 4. Requisitos de segurança (obrigatórios)
 
@@ -68,8 +69,8 @@ Abre com `python -m tradebot painel` ou com dois cliques em `Abrir painel.bat` (
 
 | ID | Requisito | Teste |
 | --- | --- | --- |
-| REQ-13 | O painel é uma página local (servidor da biblioteca padrão) com o passo a passo: (1) verificar o computador, (2) escolher o modo (`sim` sem conta ou `paper` com chaves), (3) escolher as ações, (4) ligar e (5) acompanhar. Se `config.json` não existir, ele é criado a partir de `config.example.json`. | `test_painel` |
+| REQ-13 | O painel é uma página local (servidor da biblioteca padrão) com o passo a passo: (1) verificar o computador, (2) escolher o modo (`sim` sem conta ou `paper` com chaves), (3) escolher as ações, (4) ligar e (5) acompanhar. O acompanhamento fica no topo da página, logo abaixo do aviso de risco; os passos de configuração vêm depois. Se `config.json` não existir, ele é criado a partir de `config.example.json`. | `test_painel` |
 | REQ-14 | Antes de salvar as chaves paper, o painel consulta a conta na Alpaca e mostra o resultado em português (patrimônio, ou o motivo da falha). Chave que não funciona não é salva. | `test_painel` |
 | REQ-15 | "Ligar" executa o mesmo `python -m tradebot run` em um processo separado; "Desligar" encerra esse processo. As ordens bracket já enviadas continuam valendo na corretora. O painel também oferece "Zerar agora" (paper) e o kill switch (SEC-05). | `test_painel` |
 | REQ-16 | O acompanhamento mostra o horário de Nova York e a janela de entradas no horário local, a situação do pregão, o último status do ciclo traduzido, a conta e as posições (paper) e os eventos do journal de hoje em linguagem simples. | `test_painel` |
-| REQ-17 | Radar do robô: para cada ação da lista, o acompanhamento mostra o que o robô está vigiando agora, com os mesmos números da estratégia (REQ-01..03): a faixa de abertura (máxima = linha de gatilho, mínima e stop), o último preço, quanto falta para o gatilho, um minigráfico do dia com a linha de gatilho e uma frase em português com a situação: faixa em formação, vigiando, acima da linha (entra se a barra fechar acima), rompeu agora (o robô está avaliando), rompimento já passou, vetado/bloqueado/ordem (do journal de hoje), em posição, fora da janela ou sem dados. Mostra também a hora em que a barra atual fecha (quando o robô decide), as operações do dia contra o limite e o aviso de que a Máquina do Tempo e as regras de risco ainda podem vetar. O radar só lê dados (barras e último negócio da Alpaca no paper, Yahoo no sim), guarda em cache por 30 s e nunca envia ordens. | `test_painel` |
+| REQ-17 | Radar do robô: para cada ação da lista, o acompanhamento mostra o que o robô está vigiando agora, com os mesmos números da estratégia (REQ-01..03): a faixa de abertura (máxima = linha de gatilho, mínima e stop), o último preço, quanto falta para o gatilho, um minigráfico do dia com a linha de gatilho e uma frase em português com a situação: faixa em formação, vigiando, acima da linha (entra se a barra fechar acima), rompeu agora (o robô está avaliando), rompimento já passou, vetado/bloqueado/ordem (do journal de hoje), ordem pendente (compra enviada e ainda não executada, consultada na corretora no paper), em posição, fora da janela ou sem dados. Mostra também a hora em que a barra atual fecha (quando o robô decide), as operações do dia contra o limite e o aviso de que a Máquina do Tempo e as regras de risco ainda podem vetar. O radar só lê dados (barras e último negócio da Alpaca no paper, Yahoo no sim), guarda em cache por 30 s e nunca envia ordens. | `test_painel` |

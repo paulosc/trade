@@ -23,6 +23,8 @@ def fake_send(status=200, doc=None, calls=None):
             return 200, {"is_open": False, "next_open": "2026-10-29T09:30:00-04:00"}
         if url.endswith("/v2/positions"):
             return 200, []
+        if "/v2/orders" in url and method == "GET":
+            return 200, (doc if isinstance(doc, list) else [])
         return status, doc if doc is not None else {"equity": "100000", "last_equity": "99000",
                                                     "buying_power": "200000"}
     return send
@@ -254,6 +256,7 @@ class TestHttp(Base):
         self.assertIn("Trocar chaves", body)              # chaves salvas: só confirmação + botão
         for step in ("Seu computador", "Como você quer rodar?", "Ligar o robô", "Acompanhar"):
             self.assertIn(step, body)
+        self.assertLess(body.index("<h2>Acompanhar</h2>"), body.index("Seu computador"))   # REQ-13: no topo
 
     def test_sec08_api_requires_token(self):
         self.assertEqual(self.req("/api/status")[0], 403)
@@ -355,6 +358,14 @@ class TestRadar(unittest.TestCase):
         it = self.r(OPENING, ny(10, 0), position={"qty": "10", "avg": "US$ 101,00"})
         self.assertEqual(it["state"], "posicao")
 
+    def test_req17_pending_order_explains_why(self):
+        ordem = [{"event": "order", "symbol": "AAPL", "qty": 6, "entry": 101.1}]
+        it = self.r(OPENING, ny(10, 0), price=101.6, events=ordem, traded=True,
+                    pending={"qty": "6", "limit": 101.1})
+        self.assertEqual(it["state"], "pendente")                     # antes de "já operou"
+        self.assertIn("acima do limite", it["text"])
+        self.assertIn("15:55", it["text"])
+
     def test_req17_after_entry_window(self):
         bars = OPENING + [bar(3, 100, 100.5, 99.8, 100.1)]
         self.assertEqual(self.r(bars, ny(15, 40), price=100.0)["state"], "fora")
@@ -381,6 +392,19 @@ class TestRadarPainel(Base):
         self.assertEqual(len(fetched), 2)
         self.assertEqual(r2["bar_close_in"], 140)                     # mas a contagem anda
         self.assertFalse([c for c in calls if c[0] != "GET"])         # nunca envia ordem
+
+    def test_req17_radar_reads_pending_orders_from_broker(self):
+        orders = [{"symbol": "AAPL", "side": "buy", "qty": "6", "limit_price": "101.10", "status": "new"}]
+        calls = []
+        p = self.make(send=fake_send(doc=orders, calls=calls))
+        painel.write_env_file(p.env_path, {"ALPACA_PAPER_KEY_ID": "PKTEST", "ALPACA_PAPER_SECRET_KEY": "x"})
+        painel.save_setup(self.cfg_path, "paper", "AAPL")
+        p.fetch_bars = lambda sym, cfg: OPENING
+        p.fetch_prices = lambda syms, cfg: {"AAPL": 101.6}
+        r = p.radar(ny(10, 0).astimezone(timezone.utc))
+        self.assertEqual(r["items"][0]["state"], "pendente")
+        self.assertEqual(r["pending"], 1)
+        self.assertFalse([c for c in calls if c[0] != "GET"])
 
     def test_req17_fetch_error_is_shown_not_raised(self):
         p = self.make()

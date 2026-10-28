@@ -109,6 +109,34 @@ class TestData(unittest.TestCase):
     def test_datasource_falls_back_to_yahoo_without_keys(self):
         self.assertEqual(data.DataSource({"data_source": "alpaca"}, {}).kind, "yahoo")
 
+    def test_req18_history_once_per_day_then_short_window(self):
+        from datetime import datetime, timezone
+        from urllib.parse import parse_qs, urlparse
+        seen = []
+        past_bar = {"t": "2026-10-26T13:30:00Z", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 1}
+        today_bars = [{"t": "2026-10-28T13:30:00Z", "o": 1, "h": 2, "l": 0.5, "c": 1.6, "v": 1}]
+
+        def get(url, headers=None):
+            start = parse_qs(urlparse(url).query)["start"][0]
+            seen.append(start)
+            bars = list(today_bars) + ([past_bar] if start < "2026-10-20" else [])
+            return json.dumps({"bars": bars, "next_page_token": None})
+
+        ds = data.DataSource({"data_source": "alpaca", "bar_minutes": 5,
+                              "timemachine": {"lookback_sessions": 59}},
+                             {"ALPACA_PAPER_KEY_ID": "k", "ALPACA_PAPER_SECRET_KEY": "s"}, get=get)
+        now = datetime(2026, 10, 28, 15, 0, tzinfo=timezone.utc)
+        first = ds.sessions("AMD", now=now)
+        self.assertEqual(len(first), 2)
+        self.assertLess(seen[0], "2026-08-01")                       # histórico completo
+        today_bars.append({"t": "2026-10-28T13:35:00Z", "o": 1.6, "h": 2, "l": 1, "c": 1.9, "v": 1})
+        second = ds.sessions("AMD", now=now.replace(minute=1))
+        self.assertGreaterEqual(seen[1], "2026-10-25")               # só a janela curta
+        self.assertEqual(list(second), list(first))                  # o passado veio do cache
+        self.assertEqual(second[list(second)[-1]][1]["c"], 1.9)      # e hoje foi atualizado
+        ds.sessions("AMD", now=datetime(2026, 10, 29, 15, 0, tzinfo=timezone.utc))
+        self.assertLess(seen[2], "2026-08-01")                       # virou o dia: baixa tudo de novo
+
 
 if __name__ == "__main__":
     unittest.main()

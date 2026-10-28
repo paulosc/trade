@@ -96,6 +96,10 @@ class Alpaca:
     def submit_bracket(self, symbol, qty, limit, stop, target, coid):
         return self._call("POST", "/v2/orders", bracket_payload(symbol, qty, limit, stop, target, coid))
 
+    def open_orders(self):
+        """Ordens ainda abertas (só leitura; usado pelo radar do painel, REQ-17)."""
+        return self._call("GET", "/v2/orders?status=open&limit=100") or []
+
     def flatten(self):
         self._call("DELETE", "/v2/orders")
         return self._call("DELETE", "/v2/positions?cancel_orders=true")

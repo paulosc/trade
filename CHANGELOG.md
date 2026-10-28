@@ -2,6 +2,19 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) · Versões: [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.7.0] - 2026-10-28
+
+### Corrigido
+- `trade-bot` v0.4.0: com 20 ações o ciclo levava ~2 minutos e a entrada saía atrasada. O histórico da Máquina do Tempo agora é baixado uma vez por dia e por ação; a cada ciclo só as barras de hoje (REQ-18).
+
+### Adicionado
+- Radar: estado "ordem pendente" (compra enviada e ainda não executada), com o motivo e o horário do cancelamento, e a contagem de ordens pendentes no topo (REQ-17).
+
+## [0.6.1] - 2026-10-28
+
+### Alterado
+- `trade-bot` v0.3.1: no painel, "Acompanhar" (com o radar) fica no topo da página; os passos de configuração vêm abaixo (REQ-13).
+
 ## [0.6.0] - 2026-10-28
 
 ### Adicionado

@@ -230,7 +230,7 @@ def _usd(v):
     return _money(v) if v is not None else "?"
 
 
-def symbol_radar(sym, bars, price, now_ny, cfg, events=(), position=None, traded=False):
+def symbol_radar(sym, bars, price, now_ny, cfg, events=(), position=None, traded=False, pending=None):
     """O que o robô está vigiando em `sym` agora, com a mesma regra da estratégia (REQ-01..03).
 
     `bars`: barras de 5 min; só as fechadas contam para o sinal, como no robô.
@@ -281,6 +281,12 @@ def symbol_radar(sym, bars, price, now_ny, cfg, events=(), position=None, traded
     if position:
         return done("posicao", "Comprado: %s ações a %s. Stop e alvo já estão na corretora." % (
             position.get("qty"), position.get("avg")))
+    if pending:
+        lim = pending.get("limit")
+        why = (" O preço (%s) está acima do limite, e o robô não paga mais caro." % _usd(price)
+               if price is not None and lim is not None and price > lim else "")
+        return done("pendente", "Ordem de compra pendente: %s ações a até %s.%s Se o preço voltar, executa já com "
+                    "stop e alvo; se não, é cancelada às %s." % (pending.get("qty"), _usd(lim), why, cfg["flat_by"]))
     for kind, text in reversed([describe_event(r) for r in events]):
         if kind == "ordem":
             return done("operou", "Já operou hoje. " + text)
@@ -504,14 +510,20 @@ class Painel:
         recs = jr.read(day)
         syms = cfg.get("watchlist", [])
 
-        positions, notes = {}, []
+        positions, pending, notes = {}, {}, []
         key, secret = self.keys()
         if cfg.get("mode") == "paper" and key and secret:
             try:
-                for p in self.paper_broker().positions():
+                br = self.paper_broker()
+                for p in br.positions():
                     positions[p.get("symbol")] = {"qty": p.get("qty"), "avg": _money(p.get("avg_entry_price"))}
+                for o in br.open_orders():
+                    if o.get("side") == "buy" and o.get("symbol") not in pending:
+                        lim = o.get("limit_price")
+                        pending[o.get("symbol")] = {"qty": o.get("qty"),
+                                                    "limit": float(lim) if lim is not None else None}
             except (BrokerError, OSError, ValueError) as e:
-                notes.append("Não consegui ler as posições: %s" % e)
+                notes.append("Não consegui ler posições e ordens: %s" % e)
         try:
             prices = self.fetch_prices(syms, cfg) or {}
         except Exception as e:                                          # sem preço ao vivo, segue com as barras
@@ -529,7 +541,8 @@ class Painel:
                               "text": "Não consegui buscar as cotações (%s)." % e})
                 continue
             items.append(symbol_radar(sym, bars, prices.get(sym), now_ny, cfg, events=evs,
-                                      position=positions.get(sym), traded=sym in st.get("traded", [])))
+                                      position=positions.get(sym), traded=sym in st.get("traded", []),
+                                      pending=pending.get(sym)))
 
         mins = clock.minute_of_day(now_ny)
         slot = clock.slot_of(now_ny, bm)
@@ -551,6 +564,7 @@ class Painel:
                 "entries_from": cfg["no_entries_before"], "entries_to": cfg["no_entries_after"],
                 "trades": st.get("trades", 0), "max_trades": cfg.get("max_trades_per_day"),
                 "positions": len(positions), "max_positions": cfg.get("max_open_positions"),
+                "pending": len(pending),
                 "notes": notes, "items": items}
 
     # -- leitura
