@@ -1,4 +1,4 @@
-# SPEC — trade-bot v0.4.0
+# SPEC — trade-bot v0.5.0
 
 Status: **Aprovada para implementação** · Dono: Alexandre Cappa · Última revisão: 2026-10-28
 
@@ -28,7 +28,7 @@ Nenhum código foi copiado: a implementação é própria.
 | REQ-06 | Quantidade = mínimo entre: `max_loss_per_trade_usd / risco`, `max_order_usd / preço` e `poder de compra × (1 − cash_buffer_pct)`. Zero = não opera. | `test_sizing` |
 | REQ-07 | Regras de risco bloqueiam a ordem se: fora da janela de entrada, perda do dia ≥ limite, operações no dia ≥ limite, posições abertas ≥ limite, ativo já operado hoje, R:R < mínimo, regra PDT, ou kill switch ligado. | `test_risk` |
 | REQ-08 | Toda entrada é uma ordem **bracket** (entrada limite + stop-loss + take-profit) com `client_order_id` único e determinístico (idempotente). | `test_broker` |
-| REQ-09 | Zerar tudo (cancelar ordens e fechar posições) a partir de `flat_by`, ao atingir o limite de perda diária ou com o kill switch. | `test_engine` |
+| REQ-09 | Zerar tudo (cancelar ordens e fechar posições) a partir de `flat_by`, ao atingir o limite de perda diária ou com o kill switch. Zerar só conta como feito quando a corretora confirma zero posições: primeiro espera as ordens canceladas saírem (as ações presas a um stop/alvo em cancelamento não podem ser vendidas), depois manda fechar e confere, repetindo algumas vezes. Se ainda sobrar posição, registra o erro e tenta de novo no ciclo seguinte. | `test_engine`, `test_broker_data` |
 | REQ-10 | Toda decisão (sinal, bloqueio, ordem, erro) é gravada em `state/journal-AAAA-MM-DD.jsonl`. | `test_engine` |
 | REQ-12 | O preço limite da entrada = sinal + tolerância, onde a tolerância é `max_slippage_pct` do preço, **limitada a 20% do risco**. O alvo é recalculado a partir do limite para manter o R:R. | `test_engine_backtest` |
 | REQ-11 | Backtest walk-forward da mesma regra (com e sem o filtro da Máquina do Tempo), mostrando nº de trades, taxa de acerto, R médio, R total e drawdown máximo em R. | `test_backtest` |
@@ -46,7 +46,8 @@ Nenhum código foi copiado: a implementação é própria.
 | SEC-06 | Erro de rede ou de dados nunca abre posição. Na dúvida, o robô não opera. | `test_engine` |
 | SEC-07 | O painel (§7) só trabalha com `sim` e `paper`: não grava `"mode": "live"`, não aceita chaves live (prefixo `AK`), recusa ligar se o config estiver em `live` e remove `ALPACA_LIVE_*` e `TRADEBOT_LIVE_CONFIRM` do ambiente do robô que ele liga. O modo live continua só pela CLI, com SEC-02. | `test_painel` |
 | SEC-08 | O painel escuta só em `127.0.0.1`, confere o cabeçalho `Host` (contra DNS rebinding) e exige um token aleatório, gerado a cada início, em toda chamada `/api/*` (contra CSRF). | `test_painel` |
-| SEC-09 | As chaves digitadas no painel são gravadas só em `trade-bot/.env` (ignorado pelo git) e nunca voltam ao navegador. O painel mostra apenas os 4 últimos caracteres do Key ID. | `test_painel` |
+| SEC-09 | As chaves digitadas no painel são gravadas só em `trade-bot/.env` (ignorado pelo git) e nunca voltam ao navegador. O painel mostra apenas os 4 últimos caracteres do Key ID. A gravação usa um temporário de nome único na mesma pasta, apagado se a troca falhar; `.env.*` e `*.tmp` também são ignorados pelo git. | `test_painel` |
+| SEC-10 | Um só robô por pasta de estado: `run` segura uma trava exclusiva em `state_dir/robot.lock` (liberada pelo sistema quando o processo termina) e se recusa a rodar se ela já estiver tomada; o painel também recusa "Ligar" nesse caso. O robô ligado pelo painel encerra sozinho quando o painel fecha por qualquer motivo (fim do canal de entrada), sem deixar robô órfão. | `test_engine`, `test_painel` |
 
 ## 5. Requisitos não funcionais
 
@@ -71,6 +72,6 @@ Abre com `python -m tradebot painel` ou com dois cliques em `Abrir painel.bat` (
 | --- | --- | --- |
 | REQ-13 | O painel é uma página local (servidor da biblioteca padrão) com o passo a passo: (1) verificar o computador, (2) escolher o modo (`sim` sem conta ou `paper` com chaves), (3) escolher as ações, (4) ligar e (5) acompanhar. O acompanhamento fica no topo da página, logo abaixo do aviso de risco; os passos de configuração vêm depois. Se `config.json` não existir, ele é criado a partir de `config.example.json`. | `test_painel` |
 | REQ-14 | Antes de salvar as chaves paper, o painel consulta a conta na Alpaca e mostra o resultado em português (patrimônio, ou o motivo da falha). Chave que não funciona não é salva. | `test_painel` |
-| REQ-15 | "Ligar" executa o mesmo `python -m tradebot run` em um processo separado; "Desligar" encerra esse processo. As ordens bracket já enviadas continuam valendo na corretora. O painel também oferece "Zerar agora" (paper) e o kill switch (SEC-05). | `test_painel` |
-| REQ-16 | O acompanhamento mostra o horário de Nova York e a janela de entradas no horário local, a situação do pregão, o último status do ciclo traduzido, a conta e as posições (paper) e os eventos do journal de hoje em linguagem simples. | `test_painel` |
+| REQ-15 | "Ligar" executa o mesmo `python -m tradebot run` em um processo separado; "Desligar" encerra esse processo. As ordens bracket já enviadas continuam valendo na corretora. O painel também oferece "Zerar agora" (paper) e o kill switch (SEC-05); o pedido do kill switch só aceita `on` como booleano (`true`/`false`), qualquer outro valor é recusado sem mudar nada. | `test_painel` |
+| REQ-16 | O acompanhamento mostra o horário de Nova York e a janela de entradas no horário local, a situação do pregão, o último status do ciclo traduzido, a conta e as posições (paper) e os eventos do journal de hoje em linguagem simples. O resumo da conta (patrimônio, resultado de hoje, posições abertas e a tabela das posições) fica em destaque no topo da página, acima de tudo. | `test_painel` |
 | REQ-17 | Radar do robô: para cada ação da lista, o acompanhamento mostra o que o robô está vigiando agora, com os mesmos números da estratégia (REQ-01..03): a faixa de abertura (máxima = linha de gatilho, mínima e stop), o último preço, quanto falta para o gatilho, um minigráfico do dia com a linha de gatilho e uma frase em português com a situação: faixa em formação, vigiando, acima da linha (entra se a barra fechar acima), rompeu agora (o robô está avaliando), rompimento já passou, vetado/bloqueado/ordem (do journal de hoje), ordem pendente (compra enviada e ainda não executada, consultada na corretora no paper), em posição, fora da janela ou sem dados. Mostra também a hora em que a barra atual fecha (quando o robô decide), as operações do dia contra o limite e o aviso de que a Máquina do Tempo e as regras de risco ainda podem vetar. O radar só lê dados (barras e último negócio da Alpaca no paper, Yahoo no sim), guarda em cache por 30 s e nunca envia ordens. | `test_painel` |

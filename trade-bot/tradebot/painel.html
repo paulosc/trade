@@ -24,7 +24,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink);
   font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-main { max-width: 820px; margin: 0 auto; padding: 28px 16px 80px; }
+main { max-width: 2400px; margin: 0 auto; padding: 24px clamp(16px, 2vw, 40px) 80px; }
 header { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand img { width: 40px; height: 40px; flex: none; }
@@ -83,6 +83,23 @@ input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-of
 .card { background: var(--bg); border-radius: 10px; padding: 10px 12px; }
 .card small { color: var(--muted); font-size: 13px; }
 .card b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.summary { background: var(--card); border: 2px solid var(--accent); border-radius: 14px; padding: 14px 16px; margin: 6px 0 14px; }
+.summary .cards { margin-top: 0; }
+.summary .card { padding: 12px 14px; }
+.summary .card small { font-size: 14px; }
+.summary .card b { font-size: 28px; }
+.summary table { margin-top: 12px; }
+.summary .msg:empty { display: none; }
+.mon { display: grid; gap: 18px 28px; }
+.mon-main, .mon-side { min-width: 0; }
+@media (min-width: 1300px) {
+  .mon { grid-template-columns: minmax(0, 1fr) clamp(360px, 28vw, 560px); align-items: start; }
+  .mon-side { position: sticky; top: 16px; }
+  .mon-side .feed { max-height: calc(100vh - 260px); }
+}
+.setup-grid { display: grid; gap: 0 14px; }
+@media (min-width: 1300px) { .setup-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+@media (min-width: 1300px) { .summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 18px; align-items: start; } .summary table { margin-top: 0; } .summary .msg { grid-column: 1 / -1; } }
 .pos { color: var(--good); } .neg { color: var(--bad); }
 table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
 th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
@@ -155,12 +172,18 @@ pre { background: var(--bg); border-radius: 8px; padding: 10px; font: 12px/1.45 
     </div>
     <div class="clock">Nova York agora<br><b id="nyTime">--:--</b> <span id="mktPill" class="pill off">…</span></div>
   </header>
-  <p class="sub">Acompanhe o robô aqui em cima. Para configurar, use os passos 1 a 4 mais abaixo. Este painel só liga o modo <b>sim</b> (treino) e o <b>paper</b> (dinheiro fictício). Dinheiro real continua só pela linha de comando.</p>
+  <section class="summary" id="summary" aria-label="Resumo da conta">
+    <div class="cards" id="acctCards"></div>
+    <p class="msg err" id="acctErr"></p>
+    <table id="posTable" class="hidden"><thead><tr><th>Ação</th><th>Qtd</th><th>Preço médio</th><th>Resultado</th></tr></thead><tbody></tbody></table>
+  </section>
+  <p class="sub">Acompanhe a conta e o robô aqui em cima. Para configurar, use os passos 1 a 4 mais abaixo. Este painel só liga o modo <b>sim</b> (treino) e o <b>paper</b> (dinheiro fictício). Dinheiro real continua só pela linha de comando.</p>
   <div class="warning">Day trade dá prejuízo para a maioria das pessoas. O robô não garante lucro. Use o paper por pelo menos 20 pregões antes de pensar em dinheiro real.</div>
 
   <section class="step" id="s5">
     <div class="step-head"><h2>Acompanhar</h2><span id="robotPill2" class="pill off">desligado</span></div>
-    <div class="step-body flat">
+    <div class="step-body flat mon">
+      <div class="mon-main">
       <p id="lastStatus"><b>Ainda sem ciclos.</b> Ligue o robô no passo 4.</p>
       <h3 style="font-size:15px;margin:16px 0 0">Radar: o que o robô está vigiando agora</h3>
       <div class="radar-head" id="radarHead">Carregando cotações…</div>
@@ -168,10 +191,9 @@ pre { background: var(--bg); border-radius: 8px; padding: 10px; font: 12px/1.45 
       <div class="radar" id="radar"></div>
       <p class="how-read"><span><i class="sw"></i>gatilho (máxima dos primeiros 15 min)</span><span><i class="sw band"></i>faixa de abertura</span><span><i class="sw line"></i>preço do dia</span><br>
         O robô compra quando uma barra de 5 minutos <b>fecha</b> acima do gatilho, dentro da janela de entradas. Se o rompimento passar sem entrada, a ação fica de fora até amanhã. A barra embaixo do gráfico mostra o quanto o preço está perto do gatilho.</p>
-      <div class="cards" id="acctCards"></div>
-      <p class="msg err" id="acctErr"></p>
-      <table id="posTable" class="hidden"><thead><tr><th>Ação</th><th>Qtd</th><th>Preço médio</th><th>Resultado</th></tr></thead><tbody></tbody></table>
-      <h3 style="font-size:15px;margin:18px 0 0">O que aconteceu hoje</h3>
+      </div>
+      <aside class="mon-side">
+      <h3 style="font-size:15px;margin:0">O que aconteceu hoje</h3>
       <ul class="feed" id="feed"></ul>
       <p class="muted" id="feedEmpty">Nada ainda hoje. Os sinais, vetos e ordens vão aparecer aqui.</p>
       <div class="row">
@@ -181,10 +203,12 @@ pre { background: var(--bg); border-radius: 8px; padding: 10px; font: 12px/1.45 
       </div>
       <p class="msg" id="ctlMsg"></p>
       <details><summary>Saída técnica do robô</summary><pre id="lines">(vazio)</pre></details>
+      </aside>
     </div>
   </section>
 
   <h2 class="setup-title">Configurar (passos 1 a 4)</h2>
+  <div class="setup-grid">
   <section class="step done" id="s1">
     <div class="step-head"><div class="num"><span>1</span></div><h2>Seu computador</h2></div>
     <div class="step-body">
@@ -256,6 +280,7 @@ pre { background: var(--bg); border-radius: 8px; padding: 10px; font: 12px/1.45 
     </div>
   </section>
 
+  </div>
 </main>
 <script>
 const TOKEN = "__PAINEL_TOKEN__";

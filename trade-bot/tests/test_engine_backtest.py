@@ -93,6 +93,41 @@ class TestEngine(unittest.TestCase):
         e.tick(self.at(15, 56))
         self.assertEqual(self.b.flattened, 1)
 
+    def test_req09_flat_by_retries_until_broker_confirms(self):
+        real, fails = self.b.flatten, [1]
+
+        def flaky():
+            if fails:
+                fails.pop()
+                raise BrokerError("zerar não confirmado: ainda há posições abertas (AMD 6)")
+            return real()
+        self.b.flatten = flaky
+        e = self.eng(FakeData())
+        self.assertEqual(e.tick(self.at(15, 55)), "error")             # não marca o dia como zerado
+        self.assertFalse(self.j.day_state(TODAY.isoformat())["flattened"])
+        self.assertEqual(e.tick(self.at(15, 56)), "flat")              # tenta de novo e confirma
+        self.assertTrue(self.j.day_state(TODAY.isoformat())["flattened"])
+        self.assertEqual(self.b.flattened, 1)
+        self.assertIn("error", self.events())
+
+    def test_req09_daily_loss_flatten_retried(self):
+        self.b.last_equity = 10200
+        real, fails = self.b.flatten, [1]
+
+        def flaky():
+            if fails:
+                fails.pop()
+                raise BrokerError("zerar não confirmado")
+            return real()
+        self.b.flatten = flaky
+        e = self.eng(FakeData(history_plus_today(flat_then_breakout(TODAY))))
+        self.assertEqual(e.tick(self.at(9, 50)), "halted")
+        self.assertEqual(self.b.flattened, 0)
+        self.assertEqual(e.tick(self.at(9, 51)), "halted")
+        self.assertEqual(self.b.flattened, 1)
+        e.tick(self.at(9, 52))
+        self.assertEqual(self.b.flattened, 1)                          # depois de confirmar, não repete
+
     def test_req09_daily_loss_halts_and_flattens(self):
         self.b.last_equity = 10200          # perdeu 200 hoje > 150
         e = self.eng(FakeData(history_plus_today(flat_then_breakout(TODAY))))
@@ -126,6 +161,65 @@ class TestEngine(unittest.TestCase):
         e = self.eng(FakeData())
         e.tick = lambda now=None: 1 / 0
         e.run_forever(sleep=lambda s: None, max_ticks=2)
+
+    def test_sec10_run_forever_stops_on_event(self):
+        import threading
+        e = self.eng(FakeData())
+        ticks = []
+        stop = threading.Event()
+
+        def tick(now=None):
+            ticks.append(1)
+            stop.set()                                  # o painel fechou durante o ciclo
+            return "ok"
+        e.tick = tick
+        e.cfg["poll_seconds"] = 3600                     # sem o evento, ficaria 1 hora dormindo
+        e.run_forever(stop=stop)
+        self.assertEqual(len(ticks), 1)
+
+
+class TestRunLock(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def test_sec10_only_one_robot_per_state_dir(self):
+        from tradebot.journal import release_run_lock
+        j = Journal(self.dir)
+        first = j.acquire_run_lock()
+        self.assertIsNotNone(first)
+        self.assertIsNone(Journal(self.dir).acquire_run_lock())
+        self.assertTrue(j.run_lock_held())
+        release_run_lock(first)
+        self.assertFalse(j.run_lock_held())
+        again = j.acquire_run_lock()
+        self.assertIsNotNone(again)
+        release_run_lock(again)
+
+    def test_sec10_cli_run_refuses_second_robot(self):
+        import io, json, os
+        from contextlib import redirect_stderr
+        from tradebot import __main__ as cli
+        from tradebot.journal import release_run_lock
+        c = cfg(state_dir=self.dir, mode="sim")
+        path = os.path.join(self.dir, "config.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(c, f)
+        lock = Journal(self.dir).acquire_run_lock()
+        err = io.StringIO()
+        try:
+            with redirect_stderr(err):
+                rc = cli.main(["--config", path, "run"])
+        finally:
+            release_run_lock(lock)
+        self.assertEqual(rc, 3)
+        self.assertIn("já existe um robô", err.getvalue())
+
+    def test_sec10_watch_parent_stops_on_end_of_input(self):
+        import io, threading
+        from tradebot.__main__ import watch_parent
+        stop = threading.Event()
+        watch_parent(io.StringIO("qualquer coisa"), stop)
+        self.assertTrue(stop.is_set())
 
 
 class TestBacktest(unittest.TestCase):

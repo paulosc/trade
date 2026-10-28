@@ -4,12 +4,25 @@ import argparse
 import json
 import os
 import sys
+import threading
 
 from . import __version__, backtest, clock
 from .broker import Alpaca, ConfigError, PaperSim, resolve_credentials
 from .data import DataSource
 from .engine import Engine
-from .journal import Journal
+from .journal import Journal, release_run_lock
+
+EXIT_WITH_PARENT = "TRADEBOT_EXIT_WITH_PARENT"
+
+
+def watch_parent(stream, stop):
+    """SEC-10: o painel mantém a entrada do robô aberta; quando ele fecha (por qualquer motivo), ela termina."""
+    try:
+        while stream.read(4096):
+            pass
+    except (OSError, ValueError):
+        pass
+    stop.set()
 
 REQUIRED = ["watchlist", "flat_by", "no_entries_before", "no_entries_after", "max_loss_per_trade_usd",
             "max_daily_loss_usd", "max_trades_per_day", "max_open_positions", "max_order_usd"]
@@ -72,7 +85,21 @@ def main(argv=None):
         if mode == "live":
             print("!!! MODO LIVE: DINHEIRO REAL !!!", file=sys.stderr)
         if a.cmd == "run":
-            engine.run_forever()
+            lock = engine.journal.acquire_run_lock()                    # SEC-10: um só robô por pasta
+            if lock is None:
+                print("ERRO: já existe um robô rodando com esta pasta de estado (%s). "
+                      "Desligue o outro antes." % engine.journal.dir, file=sys.stderr)
+                return 3
+            stop = threading.Event()
+            if env.get(EXIT_WITH_PARENT) == "1":                       # ligado pelo painel
+                threading.Thread(target=watch_parent, args=(sys.stdin, stop), daemon=True).start()
+            try:
+                engine.run_forever(stop=stop)
+            finally:
+                release_run_lock(lock)
+            if stop.is_set():
+                print("[%s] painel fechado: robô encerrado" % clock.now_utc().astimezone(clock.NY).strftime(
+                    "%H:%M:%S"), flush=True)
         elif a.cmd == "tick":
             print(engine.tick())
         elif a.cmd == "flatten":

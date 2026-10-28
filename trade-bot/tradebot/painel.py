@@ -11,6 +11,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.parse
 import webbrowser
@@ -79,10 +80,23 @@ def write_env_file(path, updates):
     for k, v in updates.items():
         if k not in seen:
             lines.append("%s=%s\n" % (k, v))
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.writelines(lines)
-    os.replace(tmp, path)
+    atomic_write(path, "".join(lines))
+
+
+def atomic_write(path, text):
+    """Grava via temporário de nome único na mesma pasta; apaga o temporário se algo falhar (SEC-09)."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)),
+                               prefix="." + os.path.basename(path) + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def mask(value):
@@ -127,11 +141,7 @@ def save_setup(path, mode, watchlist):
     cfg = ensure_config(path)
     cfg["mode"] = mode
     cfg["watchlist"] = parse_watchlist(watchlist)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-    os.replace(tmp, path)
+    atomic_write(path, json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
     return cfg
 
 
@@ -335,6 +345,7 @@ def robot_env(base_env, env_file, mode):
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONPATH"] = PROJECT_DIR + os.pathsep + env.get("PYTHONPATH", "")
+    env["TRADEBOT_EXIT_WITH_PARENT"] = "1"                              # SEC-10: morre junto com o painel
     return env
 
 
@@ -353,7 +364,8 @@ class Runner:
             if self.running:
                 return
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            self.proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
+            # SEC-10: a entrada do robô fica ligada ao painel; se o painel fechar, ela termina e o robô sai.
+            self.proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                          errors="replace", creationflags=flags)
             self.started_at = clock.now_utc().isoformat(timespec="seconds")
@@ -364,12 +376,24 @@ class Runner:
         with proc.stdout:
             for line in proc.stdout:
                 self.lines.append(line.rstrip())
+        if proc.stdin and not proc.stdin.closed:                        # o robô saiu sozinho
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
 
     def stop(self, timeout=10):
         with self.lock:
             p = self.proc
             if p is None or p.poll() is not None:
                 return
+            try:                                                        # SEC-10: pede para sair com calma
+                if p.stdin:
+                    p.stdin.close()
+                p.wait(timeout)
+                return
+            except (OSError, subprocess.TimeoutExpired):
+                pass
             p.terminate()
             try:
                 p.wait(timeout)
@@ -441,6 +465,9 @@ class Painel:
             raise PainelError("Salve as chaves paper da Alpaca antes de ligar (passo 2).")
         if self.journal(cfg).killed():
             raise PainelError("O kill switch está ligado. Desligue-o antes de ligar o robô.")
+        if not self.runner.running and self.journal(cfg).run_lock_held():    # SEC-10
+            raise PainelError("Já existe um robô rodando nesta pasta (talvez de um painel anterior ou do terminal). "
+                              "Feche-o antes de ligar outro.")
         env = robot_env(self.base_env, read_env_file(self.env_path), mode)
         self.runner.start(self.robot_cmd, self.dir, env)
         return {"ok": True}
@@ -459,8 +486,10 @@ class Painel:
         return {"ok": True}
 
     def kill(self, on):
+        if not isinstance(on, bool):                                    # REQ-15: só true/false
+            raise PainelError("Pedido inválido para o kill switch: use on = true ou false.")
         cfg = self.cfg()
-        self.journal(cfg).set_kill(bool(on))
+        self.journal(cfg).set_kill(on)
         if on and cfg.get("mode") == "paper" and all(self.keys()):
             try:
                 self.paper_broker().flatten()

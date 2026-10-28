@@ -106,6 +106,45 @@ class TestData(unittest.TestCase):
         self.assertEqual(s[1]["c"], 1.8)           # 09:35 ET; barra pós-mercado descartada
         self.assertEqual(sum(b is not None for b in s), 2)
 
+    def test_req09_flatten_waits_for_cancels_and_confirms(self):
+        # o caso de 28/10: stop e alvo ainda "em cancelamento" seguram as ações
+        calls, state = [], {"open_polls": 2, "pos_polls": 1, "closed": False}
+
+        def send(method, url, headers, body):
+            calls.append((method, url.split("paper-api.alpaca.markets")[-1]))
+            if method == "GET" and "/v2/orders" in url:
+                if state["open_polls"] > 0:
+                    state["open_polls"] -= 1
+                    return 200, [{"symbol": "AMD", "status": "pending_cancel"}]
+                return 200, []
+            if method == "DELETE" and "/v2/positions" in url:
+                assert state["open_polls"] == 0, "fechou antes de o cancelamento terminar"
+                state["closed"] = True
+                return 207, [{"symbol": "AMD", "status": 200}]
+            if method == "GET" and url.endswith("/v2/positions"):
+                if not state["closed"] or state["pos_polls"] > 0:
+                    state["pos_polls"] -= 1
+                    return 200, [{"symbol": "AMD", "qty": "6"}]
+                return 200, []
+            return 200, []
+        a = broker.Alpaca(broker.PAPER_URL, "k", "s", send=send, sleep=lambda s: None)
+        self.assertEqual(a.flatten(), [])
+        deletes = [c for c in calls if c[0] == "DELETE"]
+        self.assertEqual(deletes[0][1], "/v2/orders")
+        self.assertIn("/v2/positions", deletes[1][1])
+
+    def test_req09_flatten_raises_when_position_stays(self):
+        def send(method, url, headers, body):
+            if method == "GET" and url.endswith("/v2/positions"):
+                return 200, [{"symbol": "AMD", "qty": "6"}]
+            if method == "DELETE" and "/v2/positions" in url:
+                return 207, [{"symbol": "AMD", "status": 403, "body": {"message": "insufficient qty available"}}]
+            return 200, []
+        a = broker.Alpaca(broker.PAPER_URL, "k", "s", send=send, sleep=lambda s: None)
+        with self.assertRaises(broker.BrokerError) as e:
+            a.flatten(tries=2, polls=2)
+        self.assertIn("AMD 6", str(e.exception))
+
     def test_datasource_falls_back_to_yahoo_without_keys(self):
         self.assertEqual(data.DataSource({"data_source": "alpaca"}, {}).kind, "yahoo")
 

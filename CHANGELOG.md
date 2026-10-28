@@ -2,6 +2,20 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) · Versões: [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.8.0] - 2026-10-28
+
+### Segurança
+- `trade-bot` v0.5.0: um só robô por pasta de estado (trava `state/robot.lock`). O robô ligado pelo painel encerra sozinho quando o painel fecha, mesmo pela janela, sem deixar robô órfão; o painel recusa ligar um segundo (SEC-10).
+- As chaves são gravadas via temporário de nome único, apagado se a gravação falhar; `.env.*` e `*.tmp` entram no `.gitignore` (SEC-09).
+- O kill switch do painel só aceita `true`/`false` (REQ-15).
+
+### Corrigido
+- Zerar (às 15:55, no limite de perda e no botão "Zerar"): a Alpaca recusava vender ações ainda presas ao stop/alvo em cancelamento e o robô marcava o dia como zerado mesmo assim, deixando a posição aberta e sem stop (aconteceu com a AMD em 28/10). Agora espera o cancelamento, fecha, confere zero posições e repete; se não confirmar, registra o erro e tenta de novo no ciclo seguinte (REQ-09).
+
+### Alterado
+- Painel: resumo da conta (patrimônio, resultado de hoje, posições) em destaque no topo, acima de tudo (REQ-16); a página usa a largura toda da tela, com radar e "O que aconteceu hoje" lado a lado e os passos de configuração em duas colunas em telas grandes.
+- Relatório da auditoria de segurança (skill da Cloudflare, perfil rápido) em `docs/seguranca/auditoria-2026-10-28.md`.
+
 ## [0.7.0] - 2026-10-28
 
 ### Corrigido

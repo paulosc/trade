@@ -135,7 +135,7 @@ class TestRobot(Base):
         self.assertFalse(p.runner.running)
 
     def test_req15_start_and_stop_process(self):
-        script = "import time\nprint('[09:50:00] outside-window', flush=True)\ntime.sleep(60)"
+        script = "import sys\nprint('[09:50:00] outside-window', flush=True)\nsys.stdin.read()"
         p = self.make(robot_cmd=[sys.executable, "-c", script])
         painel.save_setup(self.cfg_path, "sim", "AAPL")
         p.start()
@@ -149,6 +149,65 @@ class TestRobot(Base):
         self.assertTrue(st["last_status_pt"])          # fora do pregão vira "bolsa fechada"
         p.stop()
         self.assertFalse(p.runner.running)
+
+    def test_sec10_robot_exits_when_panel_pipe_closes(self):
+        # o robô de verdade usa watch_parent; aqui, o mesmo mecanismo sem rede nem corretora
+        script = ("import sys, threading\nfrom tradebot.__main__ import watch_parent\n"
+                  "ev = threading.Event()\nthreading.Thread(target=watch_parent, args=(sys.stdin, ev), daemon=True).start()\n"
+                  "print('[10:00:00] ok', flush=True)\nev.wait(30)\nprint('saiu', flush=True)")
+        # ambiente real (tzdata do usuário); robot_env ainda tira as variáveis do modo live
+        p = self.make(robot_cmd=[sys.executable, "-c", script], base_env=dict(os.environ))
+        painel.save_setup(self.cfg_path, "sim", "AAPL")
+        p.start()
+        proc = p.runner.proc
+        proc.stdin.close()                                  # o painel "morreu": a entrada do robô termina
+        proc.wait(10)
+        self.assertEqual(proc.returncode, 0)
+        for _ in range(100):
+            if "saiu" in p.runner.lines:
+                break
+            threading.Event().wait(0.05)
+        self.assertIn("saiu", p.runner.lines)
+
+    def test_sec10_robot_env_exits_with_parent(self):
+        env = painel.robot_env({}, {}, "sim")
+        self.assertEqual(env["TRADEBOT_EXIT_WITH_PARENT"], "1")
+
+    def test_sec10_start_refused_when_another_robot_holds_lock(self):
+        from tradebot.journal import Journal, release_run_lock
+        p = self.make(robot_cmd=[sys.executable, "-c", "pass"])
+        painel.save_setup(self.cfg_path, "sim", "AAPL")
+        lock = Journal(os.path.join(self.dir, "state")).acquire_run_lock()
+        try:
+            with self.assertRaises(painel.PainelError) as e:
+                p.start()
+            self.assertIn("Já existe um robô", str(e.exception))
+            self.assertFalse(p.runner.running)
+        finally:
+            release_run_lock(lock)
+
+    def test_sec09_temp_file_removed_when_replace_fails(self):
+        env = os.path.join(self.dir, ".env")
+        painel.write_env_file(env, {"ALPACA_PAPER_KEY_ID": "PKOLD"})
+        real = os.replace
+
+        def boom(src, dst):
+            raise PermissionError("arquivo em uso")
+        painel.os.replace = boom
+        try:
+            with self.assertRaises(PermissionError):
+                painel.write_env_file(env, {"ALPACA_PAPER_KEY_ID": "PKNEW", "ALPACA_PAPER_SECRET_KEY": "s"})
+        finally:
+            painel.os.replace = real
+        self.assertEqual([f for f in os.listdir(self.dir) if f.endswith(".tmp")], [])
+        self.assertEqual(painel.read_env_file(env), {"ALPACA_PAPER_KEY_ID": "PKOLD"})
+
+    def test_req15_kill_accepts_only_boolean(self):
+        p = self.make()
+        for bad in ("false", "true", 0, 1, None, [], {}):
+            with self.assertRaises(painel.PainelError):
+                p.kill(bad)
+        self.assertFalse(p.status()["killed"])                # nada mudou
 
     def test_req15_kill_blocks_start(self):
         p = self.make()
@@ -257,6 +316,7 @@ class TestHttp(Base):
         for step in ("Seu computador", "Como você quer rodar?", "Ligar o robô", "Acompanhar"):
             self.assertIn(step, body)
         self.assertLess(body.index("<h2>Acompanhar</h2>"), body.index("Seu computador"))   # REQ-13: no topo
+        self.assertLess(body.index('id="acctCards"'), body.index("<h2>Acompanhar</h2>"))   # REQ-16: conta acima de tudo
 
     def test_sec08_api_requires_token(self):
         self.assertEqual(self.req("/api/status")[0], 403)

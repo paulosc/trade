@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import time
 import urllib.error
 import urllib.request
 
@@ -69,8 +70,8 @@ def _default_send(method, url, headers, body):
 
 
 class Alpaca:
-    def __init__(self, base_url, key, secret, send=_default_send):
-        self.base, self.send = base_url, send
+    def __init__(self, base_url, key, secret, send=_default_send, sleep=time.sleep):
+        self.base, self.send, self.sleep = base_url, send, sleep
         self._headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret,
                          "Content-Type": "application/json"}
 
@@ -100,9 +101,30 @@ class Alpaca:
         """Ordens ainda abertas (só leitura; usado pelo radar do painel, REQ-17)."""
         return self._call("GET", "/v2/orders?status=open&limit=100") or []
 
-    def flatten(self):
+    def flatten(self, tries=4, polls=12, pause=0.5):
+        """Cancela tudo e fecha as posições, conferindo na corretora (REQ-09).
+
+        A Alpaca não vende ações presas a um stop/alvo que ainda está sendo cancelado; por isso
+        espera as ordens saírem antes de fechar, e confere que sobrou zero posição.
+        """
         self._call("DELETE", "/v2/orders")
-        return self._call("DELETE", "/v2/positions?cancel_orders=true")
+        self._wait(lambda: not self.open_orders(), polls, pause)
+        for _ in range(tries):
+            self._call("DELETE", "/v2/positions?cancel_orders=true")
+            if self._wait(lambda: not self.positions(), polls, pause):
+                return []
+        left = ", ".join("%s %s" % (p.get("symbol"), p.get("qty")) for p in self.positions())
+        if not left:
+            return []
+        raise BrokerError("zerar não confirmado: ainda há posições abertas (%s)" % left)
+
+    def _wait(self, done, polls, pause):
+        for i in range(polls):
+            if done():
+                return True
+            if i < polls - 1:
+                self.sleep(pause)
+        return False
 
 
 class PaperSim:

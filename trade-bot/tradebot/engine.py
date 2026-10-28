@@ -15,11 +15,14 @@ class Engine:
         self.cfg, self.broker, self.data, self.journal, self.mode = cfg, broker, data_source, journal, mode
 
     def _flatten(self, day, why):
+        """True só quando a corretora confirmou zero posições (REQ-09)."""
         try:
             self.broker.flatten()
             self.journal.log(day, "flatten", reason=why)
+            return True
         except BrokerError as e:
             self.journal.log(day, "error", where="flatten", error=str(e))
+            return False
 
     def tick(self, now=None):
         now = now or clock.now_utc()
@@ -37,7 +40,8 @@ class Engine:
             m = clock.minute_of_day(now_ny)
             if m >= clock.hhmm_to_min(cfg["flat_by"]):                  # REQ-09
                 if not st["flattened"]:
-                    self._flatten(day, "flat_by %s" % cfg["flat_by"])
+                    if not self._flatten(day, "flat_by %s" % cfg["flat_by"]):
+                        return "error"                                  # tenta de novo no próximo ciclo
                     st["flattened"] = True
                     self.journal.save_day_state(day, st)
                 return "flat"
@@ -49,8 +53,11 @@ class Engine:
             if day_pnl <= -cfg["max_daily_loss_usd"] and not st["halted"]:
                 st["halted"] = True
                 self.journal.save_day_state(day, st)
-                self._flatten(day, "perda diária %.2f" % day_pnl)
             if st["halted"]:
+                if not st.get("halt_flattened"):                       # repete até a corretora confirmar
+                    if self._flatten(day, "perda diária %.2f" % day_pnl):
+                        st["halt_flattened"] = True
+                        self.journal.save_day_state(day, st)
                 return "halted"
             if m < clock.hhmm_to_min(cfg["no_entries_before"]) or m > clock.hhmm_to_min(cfg["no_entries_after"]):
                 return "outside-window"
@@ -121,9 +128,12 @@ class Engine:
                              broker_id=(res or {}).get("id"), **order)
         return "ok"
 
-    def run_forever(self, sleep=time.sleep, max_ticks=None):
+    def run_forever(self, sleep=time.sleep, max_ticks=None, stop=None):
+        """Roda até `max_ticks` ou até `stop` (threading.Event) ser acionado. SEC-10."""
+        if stop is not None:
+            sleep = stop.wait                                           # acorda na hora se pedirem para parar
         n = 0
-        while max_ticks is None or n < max_ticks:
+        while (max_ticks is None or n < max_ticks) and not (stop is not None and stop.is_set()):
             try:
                 status = self.tick()
             except Exception as e:                                      # nunca morrer em silêncio
