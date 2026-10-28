@@ -1,4 +1,4 @@
-# SPEC — trade-bot v0.2.0
+# SPEC — trade-bot v0.3.0
 
 Status: **Aprovada para implementação** · Dono: Alexandre Cappa · Última revisão: 2026-10-28
 
@@ -72,3 +72,4 @@ Abre com `python -m tradebot painel` ou com dois cliques em `Abrir painel.bat` (
 | REQ-14 | Antes de salvar as chaves paper, o painel consulta a conta na Alpaca e mostra o resultado em português (patrimônio, ou o motivo da falha). Chave que não funciona não é salva. | `test_painel` |
 | REQ-15 | "Ligar" executa o mesmo `python -m tradebot run` em um processo separado; "Desligar" encerra esse processo. As ordens bracket já enviadas continuam valendo na corretora. O painel também oferece "Zerar agora" (paper) e o kill switch (SEC-05). | `test_painel` |
 | REQ-16 | O acompanhamento mostra o horário de Nova York e a janela de entradas no horário local, a situação do pregão, o último status do ciclo traduzido, a conta e as posições (paper) e os eventos do journal de hoje em linguagem simples. | `test_painel` |
+| REQ-17 | Radar do robô: para cada ação da lista, o acompanhamento mostra o que o robô está vigiando agora, com os mesmos números da estratégia (REQ-01..03): a faixa de abertura (máxima = linha de gatilho, mínima e stop), o último preço, quanto falta para o gatilho, um minigráfico do dia com a linha de gatilho e uma frase em português com a situação: faixa em formação, vigiando, acima da linha (entra se a barra fechar acima), rompeu agora (o robô está avaliando), rompimento já passou, vetado/bloqueado/ordem (do journal de hoje), em posição, fora da janela ou sem dados. Mostra também a hora em que a barra atual fecha (quando o robô decide), as operações do dia contra o limite e o aviso de que a Máquina do Tempo e as regras de risco ainda podem vetar. O radar só lê dados (barras e último negócio da Alpaca no paper, Yahoo no sim), guarda em cache por 30 s e nunca envia ordens. | `test_painel` |

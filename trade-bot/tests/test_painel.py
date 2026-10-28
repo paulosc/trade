@@ -251,6 +251,7 @@ class TestHttp(Base):
         self.assertEqual(code, 200)
         self.assertIn(self.p.token, body)
         self.assertIn('rel="icon"', body)
+        self.assertIn("Trocar chaves", body)              # chaves salvas: só confirmação + botão
         for step in ("Seu computador", "Como você quer rodar?", "Ligar o robô", "Acompanhar"):
             self.assertIn(step, body)
 
@@ -272,6 +273,125 @@ class TestHttp(Base):
         code, body = self.req("/api/setup", token=self.p.token, body={"mode": "live", "watchlist": "AAPL"})
         self.assertEqual(code, 400)
         self.assertIn("live", json.loads(body)["error"])
+
+    def test_req17_radar_endpoint_requires_token(self):
+        self.p.fetch_bars = lambda sym, cfg: []
+        self.p.fetch_prices = lambda syms, cfg: {}
+        self.assertEqual(self.req("/api/radar")[0], 403)
+        code, body = self.req("/api/radar", token=self.p.token)
+        self.assertEqual(code, 200)
+        self.assertIn("items", json.loads(body))
+        code, page = self.req("/")
+        self.assertIn("Radar: o que o robô está vigiando agora", page)
+
+
+# ---------------------------------------------------------------- radar (REQ-17)
+
+RCFG = {"bar_minutes": 5, "opening_range_minutes": 15, "stop_rule": "or_mid", "target_r": 1.0,
+        "no_entries_before": "09:45", "no_entries_after": "15:30", "flat_by": "15:55"}
+
+
+def ny(hh, mm, ss=0):
+    from tradebot import clock
+    return datetime(2026, 10, 28, hh, mm, ss, tzinfo=clock.NY)        # quarta-feira
+
+
+def bar(slot, o, h, l, c):
+    t = int(ny(9, 30).timestamp()) + slot * 300
+    return {"t": t, "o": o, "h": h, "l": l, "c": c, "v": 1000}
+
+
+# faixa de abertura (3 barras): máxima 101, mínima 99, stop (meio) 100
+OPENING = [bar(0, 100, 101, 99.5, 100.5), bar(1, 100.5, 100.8, 99, 99.6), bar(2, 99.6, 100.9, 99.4, 100.2)]
+
+
+class TestRadar(unittest.TestCase):
+    def r(self, bars, now, price=None, **kw):
+        return painel.symbol_radar("AAPL", bars, price, now, RCFG, **kw)
+
+    def test_req17_before_open_waits(self):
+        it = self.r([], ny(9, 0))
+        self.assertEqual(it["state"], "antes")
+        self.assertIn("09:45", it["text"])
+
+    def test_req17_opening_range_forming(self):
+        it = self.r(OPENING[:2], ny(9, 41), price=100.1)
+        self.assertEqual(it["state"], "formando")
+        self.assertEqual(it["or_high"], 101)
+
+    def test_req17_watching_shows_distance_to_trigger(self):
+        bars = OPENING + [bar(3, 100.2, 100.6, 100, 100.4)]
+        it = self.r(bars, ny(9, 52), price=100.0)
+        self.assertEqual(it["state"], "vigiando")
+        self.assertEqual((it["or_high"], it["or_low"], it["stop"]), (101, 99, 100.0))
+        self.assertEqual(it["dist"], 1.0)
+        self.assertIn("Falta US$ 1,00", it["text"])
+        self.assertEqual(it["closes"], [100.5, 99.6, 100.2, 100.4])
+
+    def test_req17_above_trigger_before_bar_closes(self):
+        it = self.r(OPENING, ny(9, 47), price=101.4)
+        self.assertEqual(it["state"], "acima")
+        self.assertIn("09:50", it["text"])                         # a barra atual fecha às 09:50
+
+    def test_req17_breakout_on_last_closed_bar_is_signal(self):
+        bars = OPENING + [bar(3, 100.5, 101.6, 100.4, 101.5)]
+        it = self.r(bars, ny(9, 51), price=101.5)
+        self.assertEqual(it["state"], "sinal")
+        self.assertIn("09:50", it["text"])
+
+    def test_req17_old_breakout_is_gone_for_the_day(self):
+        bars = OPENING + [bar(3, 100.5, 101.6, 100.4, 101.5), bar(4, 101.5, 101.7, 101, 101.2)]
+        it = self.r(bars, ny(9, 56), price=101.2)
+        self.assertEqual(it["state"], "perdeu")
+
+    def test_req17_ignores_bar_still_forming(self):
+        # barra 3 ainda aberta às 09:47, mesmo que a fonte já mande: não vale como sinal
+        bars = OPENING + [bar(3, 100.5, 101.6, 100.4, 101.5)]
+        self.assertEqual(self.r(bars, ny(9, 47), price=101.5)["state"], "acima")
+
+    def test_req17_journal_veto_and_position(self):
+        veto = [{"event": "timemachine", "symbol": "AAPL", "approved": False, "reason": "vantagem pequena"}]
+        self.assertEqual(self.r(OPENING, ny(10, 0), events=veto)["state"], "vetado")
+        it = self.r(OPENING, ny(10, 0), position={"qty": "10", "avg": "US$ 101,00"})
+        self.assertEqual(it["state"], "posicao")
+
+    def test_req17_after_entry_window(self):
+        bars = OPENING + [bar(3, 100, 100.5, 99.8, 100.1)]
+        self.assertEqual(self.r(bars, ny(15, 40), price=100.0)["state"], "fora")
+
+
+class TestRadarPainel(Base):
+    def test_req17_radar_reads_only_and_caches(self):
+        calls, fetched = [], []
+        p = self.make(send=fake_send(calls=calls))
+        painel.save_setup(self.cfg_path, "sim", "AAPL, NVDA")
+
+        def bars(sym, cfg):
+            fetched.append(sym)
+            return OPENING
+        p.fetch_bars = bars
+        p.fetch_prices = lambda syms, cfg: {"AAPL": 100.0}
+        now = ny(9, 52, 30).astimezone(timezone.utc)
+        r = p.radar(now)
+        self.assertEqual([i["symbol"] for i in r["items"]], ["AAPL", "NVDA"])
+        self.assertEqual(r["bar_close_at"], "09:55")
+        self.assertEqual(r["bar_close_in"], 150)
+        self.assertTrue(any("desligado" in n for n in r["notes"]))
+        r2 = p.radar(now.replace(second=40))                          # dentro dos 30 s: cache
+        self.assertEqual(len(fetched), 2)
+        self.assertEqual(r2["bar_close_in"], 140)                     # mas a contagem anda
+        self.assertFalse([c for c in calls if c[0] != "GET"])         # nunca envia ordem
+
+    def test_req17_fetch_error_is_shown_not_raised(self):
+        p = self.make()
+        painel.save_setup(self.cfg_path, "sim", "AAPL")
+
+        def boom(sym, cfg):
+            raise OSError("sem rede")
+        p.fetch_bars, p.fetch_prices = boom, boom
+        r = p.radar(ny(10, 0).astimezone(timezone.utc))
+        self.assertEqual(r["items"][0]["state"], "sem_dados")
+        self.assertIn("sem rede", r["items"][0]["text"])
 
 
 if __name__ == "__main__":

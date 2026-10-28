@@ -2,6 +2,14 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) · Versões: [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.6.0] - 2026-10-28
+
+### Adicionado
+- `trade-bot` v0.3.0: radar no painel (REQ-17). Para cada ação: minigráfico do dia com a faixa de abertura e a linha de gatilho, último preço, quanto falta para o gatilho, situação em português (vigiando, acima do gatilho, rompeu, rompimento passou, vetado, comprado…) e contagem regressiva até o fechamento da barra, quando o robô decide. Só leitura, com cache de 30 s.
+
+### Alterado
+- Painel: com as chaves já salvas, o passo 2 mostra só a confirmação e o botão "Trocar chaves".
+
 ## [0.5.0] - 2026-10-28
 
 ### Adicionado

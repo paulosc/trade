@@ -1,6 +1,6 @@
 """Painel local no navegador: passo a passo para ligar o robô em sim ou paper.
 
-REQ-13..16, SEC-07..09. Só biblioteca padrão. Abre com `python -m tradebot painel`.
+REQ-13..17, SEC-07..09. Só biblioteca padrão. Abre com `python -m tradebot painel`.
 """
 
 import collections
@@ -12,11 +12,12 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.parse
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import __version__, clock
+from . import __version__, clock, data, strategy
 from .broker import PAPER_URL, Alpaca, BrokerError, _default_send
 from .journal import Journal
 
@@ -29,6 +30,7 @@ LIVE_VARS = ("ALPACA_LIVE_KEY_ID", "ALPACA_LIVE_SECRET_KEY", "TRADEBOT_LIVE_CONF
 PANEL_MODES = ("sim", "paper")                    # SEC-07: nunca "live"
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z.]{0,9}$")
 MAX_SYMBOLS = 20
+RADAR_TTL = 30                                    # REQ-17: segundos de cache dos dados do radar
 
 STATUS_PT = {
     "closed": "Bolsa fechada. O robô está esperando o pregão abrir.",
@@ -204,6 +206,119 @@ def ny_hhmm(ts_iso):
         return ""
 
 
+# ------------------------------------------------------------------ radar (REQ-17)
+
+def _hhmm(minutes):
+    return "%02d:%02d" % divmod(int(minutes), 60)
+
+
+def slot_end_hhmm(slot, bar_minutes):
+    """Horário de NY em que a barra `slot` fecha (ex.: slot 2 de 5 min -> 09:45)."""
+    return _hhmm(clock.OPEN_MIN + (slot + 1) * bar_minutes)
+
+
+def latest_prices_alpaca(symbols, key, secret, feed="iex", get=data.http_get):
+    """Último negócio de cada ação, numa consulta só. Só leitura."""
+    q = urllib.parse.urlencode({"symbols": ",".join(symbols), "feed": feed})
+    raw = get("https://data.alpaca.markets/v2/stocks/trades/latest?" + q,
+              {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret})
+    trades = json.loads(raw).get("trades") or {}
+    return {s: float(t["p"]) for s, t in trades.items() if t and t.get("p") is not None}
+
+
+def _usd(v):
+    return _money(v) if v is not None else "?"
+
+
+def symbol_radar(sym, bars, price, now_ny, cfg, events=(), position=None, traded=False):
+    """O que o robô está vigiando em `sym` agora, com a mesma regra da estratégia (REQ-01..03).
+
+    `bars`: barras de 5 min; só as fechadas contam para o sinal, como no robô.
+    `price`: último negócio (ou None). `events`: registros do journal de hoje desta ação.
+    """
+    bm = cfg.get("bar_minutes", 5)
+    n = cfg.get("opening_range_minutes", 15) // bm
+    mins = clock.minute_of_day(now_ny)
+    today = data.group_sessions(bars or [], bm).get(now_ny.date())
+    out = {"symbol": sym, "state": "sem_dados", "price": price, "or_high": None, "or_low": None,
+           "stop": None, "dist": None, "dist_pct": None, "closes": [], "text": ""}
+
+    def done(state, text):
+        out.update(state=state, text=text)
+        return out
+
+    if today is None:
+        if now_ny.weekday() >= 5 or mins < clock.OPEN_MIN:
+            return done("antes", "O pregão ainda não começou. A linha de gatilho sai às %s." % slot_end_hhmm(n - 1, bm))
+        return done("sem_dados", "Sem cotações de hoje para esta ação. O robô também não vai operá-la.")
+
+    closed = data.closed_only(today, now_ny, bm)
+    last_closed = clock.last_closed_slot(now_ny, bm)
+    got = [b for b in closed if b is not None]
+    if price is None and got:
+        price = got[-1]["c"]
+    out["price"] = price
+    out["closes"] = [None if b is None else b["c"] for b in closed[:last_closed + 1]]
+
+    # faixa de abertura (ou o pedaço dela que já existe)
+    rng = strategy.opening_range(closed, n) if last_closed >= n - 1 else None
+    first = [b for b in closed[:n] if b is not None]
+    if rng:
+        oh, ol = rng
+    elif first:
+        oh, ol = max(b["h"] for b in first), min(b["l"] for b in first)
+    else:
+        oh = ol = None
+    if oh is not None:
+        oh, ol = round(oh, 2), round(ol, 2)                            # tela e frase com o mesmo centavo
+        out.update(or_high=oh, or_low=ol, stop=strategy.stop_price(cfg.get("stop_rule", "or_mid"), oh, ol))
+        if price:
+            out.update(dist=round(oh - price, 2), dist_pct=round((oh - price) / price * 100, 2))
+
+    slot = clock.slot_of(now_ny, bm)
+    bar_close = slot_end_hhmm(slot, bm) if slot is not None else None
+
+    if position:
+        return done("posicao", "Comprado: %s ações a %s. Stop e alvo já estão na corretora." % (
+            position.get("qty"), position.get("avg")))
+    for kind, text in reversed([describe_event(r) for r in events]):
+        if kind == "ordem":
+            return done("operou", "Já operou hoje. " + text)
+        if kind in ("vetado", "bloqueado"):
+            return done(kind, text + " Hoje o robô não entra mais nesta ação.")
+    if traded:
+        return done("operou", "Já operou esta ação hoje. Não entra de novo.")
+    if mins >= clock.CLOSE_MIN:
+        return done("fora", "Pregão encerrado.")
+    if last_closed < n - 1:
+        if oh is None:
+            return done("formando", "Marcando a faixa de abertura até %s." % slot_end_hhmm(n - 1, bm))
+        return done("formando", "Marcando a faixa de abertura até %s. Até agora: máxima %s, mínima %s." % (
+            slot_end_hhmm(n - 1, bm), _usd(oh), _usd(ol)))
+    if rng is None:
+        return done("sem_dados", "Faltou cotação nos primeiros minutos: sem faixa de abertura, o robô não opera esta ação hoje.")
+
+    sig = strategy.orb_signal(closed, last_closed, cfg) if last_closed >= n else {"status": "none"}
+    if sig["status"] == "triggered":
+        return done("sinal", "ROMPEU! A barra das %s fechou em %s, acima do gatilho %s. O robô decide neste minuto "
+                    "(a Máquina do Tempo e as regras de risco ainda podem vetar)." % (
+                        slot_end_hhmm(sig["slot"], bm), _usd(sig["entry"]), _usd(oh)))
+    if sig["status"] == "expired":
+        return done("perdeu", "Rompeu na barra das %s, mas o sinal só vale na hora. Hoje o robô não entra mais nesta ação."
+                    % slot_end_hhmm(sig["slot"], bm))
+    if sig["status"] == "invalid":
+        return done("sem_dados", "Sinal inválido hoje (%s)." % sig.get("reason", ""))
+    if mins > clock.hhmm_to_min(cfg["no_entries_after"]):
+        return done("fora", "A janela de entradas acabou às %s. Hoje não entra mais." % cfg["no_entries_after"])
+    if price is not None and price > oh:
+        return done("acima", "Acima do gatilho agora! Se a barra fechar acima de %s às %s, o robô tenta comprar." % (
+            _usd(oh), bar_close))
+    if not price:
+        return done("vigiando", "Vigiando o gatilho em %s." % _usd(oh))
+    return done("vigiando", "Falta %s (%s%%) para o gatilho em %s." % (
+        _usd(oh - price), format(out["dist_pct"], ".2f").replace(".", ","), _usd(oh)))
+
+
 # ------------------------------------------------------------------ processo do robô (REQ-15)
 
 def robot_env(base_env, env_file, mode):
@@ -276,6 +391,9 @@ class Painel:
         self.robot_cmd = robot_cmd or [sys.executable, "-m", "tradebot", "--config", self.config_path, "run"]
         self.token = secrets.token_urlsafe(24)                         # SEC-08
         self.runner = Runner()
+        self.fetch_bars = self._fetch_bars                              # trocáveis nos testes
+        self.fetch_prices = self._fetch_prices
+        self._radar, self._radar_at, self._radar_lock = None, 0.0, threading.Lock()
         ensure_config(self.config_path)
 
     # -- helpers
@@ -343,6 +461,97 @@ class Painel:
             except BrokerError:
                 pass                                                    # o robô tenta de novo no próximo ciclo
         return {"ok": True}
+
+    # -- radar (REQ-17): só leitura, nunca envia ordem
+    def _fetch_bars(self, sym, cfg):
+        bm = cfg.get("bar_minutes", 5)
+        key, secret = self.keys()
+        if cfg.get("mode") == "paper" and key and secret and cfg.get("data_source", "alpaca") == "alpaca":
+            return data.fetch_alpaca(sym, key, secret, days=1, bar_minutes=bm, feed=cfg.get("alpaca_feed", "iex"))
+        return data.fetch_yahoo(sym, days=1, bar_minutes=bm)
+
+    def _fetch_prices(self, syms, cfg):
+        key, secret = self.keys()
+        if cfg.get("mode") == "paper" and key and secret:
+            return latest_prices_alpaca(syms, key, secret, feed=cfg.get("alpaca_feed", "iex"))
+        return {}                                                       # sim: usa o fechamento da última barra
+
+    def radar(self, now=None):
+        now = now or clock.now_utc()
+        with self._radar_lock:
+            age = now.timestamp() - self._radar_at
+            closes_in = (self._radar or {}).get("bar_close_in")
+            bar_closed = closes_in is not None and closes_in - age <= 0     # barra nova: busca de novo
+            if self._radar is not None and 0 <= age < RADAR_TTL and not bar_closed:
+                out = dict(self._radar)
+                if out["bar_close_in"] is not None:                     # a contagem anda mesmo com cache
+                    out["bar_close_in"] = max(0, int(out["bar_close_in"] - age))
+            else:
+                self._radar = out = self._build_radar(now)
+                self._radar_at = now.timestamp()
+        out = dict(out)
+        if not self.runner.running:                                     # na hora, fora do cache
+            out["notes"] = out["notes"] + ["O robô está desligado: o radar mostra, mas ninguém opera. Ligue no passo 4."]
+        return out
+
+    def _build_radar(self, now):
+        cfg = self.cfg()
+        bm = cfg.get("bar_minutes", 5)
+        now_ny = now.astimezone(clock.NY)
+        day = now_ny.date().isoformat()
+        jr = self.journal(cfg)
+        st = jr.day_state(day)
+        recs = jr.read(day)
+        syms = cfg.get("watchlist", [])
+
+        positions, notes = {}, []
+        key, secret = self.keys()
+        if cfg.get("mode") == "paper" and key and secret:
+            try:
+                for p in self.paper_broker().positions():
+                    positions[p.get("symbol")] = {"qty": p.get("qty"), "avg": _money(p.get("avg_entry_price"))}
+            except (BrokerError, OSError, ValueError) as e:
+                notes.append("Não consegui ler as posições: %s" % e)
+        try:
+            prices = self.fetch_prices(syms, cfg) or {}
+        except Exception as e:                                          # sem preço ao vivo, segue com as barras
+            prices = {}
+            notes.append("Sem último preço ao vivo (%s); usando o fechamento da última barra." % e)
+
+        items = []
+        for sym in syms:
+            evs = [r for r in recs if r.get("symbol") == sym]
+            try:
+                bars = self.fetch_bars(sym, cfg)
+            except Exception as e:
+                items.append({"symbol": sym, "state": "sem_dados", "price": prices.get(sym), "closes": [],
+                              "or_high": None, "or_low": None, "stop": None, "dist": None, "dist_pct": None,
+                              "text": "Não consegui buscar as cotações (%s)." % e})
+                continue
+            items.append(symbol_radar(sym, bars, prices.get(sym), now_ny, cfg, events=evs,
+                                      position=positions.get(sym), traded=sym in st.get("traded", [])))
+
+        mins = clock.minute_of_day(now_ny)
+        slot = clock.slot_of(now_ny, bm)
+        bar_close_at = bar_close_in = None
+        if slot is not None and now_ny.weekday() < 5:
+            end = clock.OPEN_MIN + (slot + 1) * bm
+            bar_close_at = _hhmm(end)
+            bar_close_in = max(0, (end - mins) * 60 - now_ny.second)
+        if st.get("trades", 0) >= cfg.get("max_trades_per_day", 0):
+            notes.append("Já fez as %d operações permitidas hoje: não abre mais nada." % cfg.get("max_trades_per_day", 0))
+        if len(positions) >= cfg.get("max_open_positions", 99):
+            notes.append("Já está com o máximo de posições abertas: só entra de novo quando alguma fechar.")
+        if st.get("halted"):
+            notes.append("Parado hoje: o limite de perda do dia foi atingido.")
+        if jr.killed():
+            notes.append("Kill switch ligado: nenhuma entrada.")
+        return {"updated": now_ny.strftime("%H:%M:%S"), "bar_minutes": bm,
+                "bar_close_at": bar_close_at, "bar_close_in": bar_close_in,
+                "entries_from": cfg["no_entries_before"], "entries_to": cfg["no_entries_after"],
+                "trades": st.get("trades", 0), "max_trades": cfg.get("max_trades_per_day"),
+                "positions": len(positions), "max_positions": cfg.get("max_open_positions"),
+                "notes": notes, "items": items}
 
     # -- leitura
     def status(self, now=None):
@@ -451,6 +660,9 @@ def make_handler(painel, port):
             elif path == "/api/status":
                 if self._guard(True):
                     self._send(200, painel.status())
+            elif path == "/api/radar":                                   # REQ-17
+                if self._guard(True):
+                    self._send(200, painel.radar())
             else:
                 self._send(404, {"error": "não encontrado"})
 

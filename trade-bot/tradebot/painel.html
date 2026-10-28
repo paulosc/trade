@@ -100,6 +100,38 @@ details { margin-top: 12px; }
 summary { cursor: pointer; color: var(--muted); font-size: 14px; }
 pre { background: var(--bg); border-radius: 8px; padding: 10px; font: 12px/1.45 var(--mono); max-height: 220px; overflow: auto; white-space: pre-wrap; }
 .hidden { display: none !important; }
+/* radar (REQ-17) */
+.radar-head { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; margin-top: 8px; font-size: 14px; color: var(--muted); }
+.radar-head b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.countdown { font-size: 22px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.notes { list-style: none; padding: 0; margin: 8px 0 0; }
+.notes li { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 6px 10px; font-size: 13px; margin-top: 6px; }
+.radar { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-top: 12px; }
+.rc { background: var(--bg); border: 2px solid transparent; border-radius: 12px; padding: 10px 12px; }
+.rc-top { display: flex; align-items: center; gap: 8px; }
+.rc-top .sym { font-size: 17px; font-weight: 700; }
+.rc-top .px { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+.chip { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px;
+  background: var(--line); color: var(--muted); }
+.rc svg { display: block; width: 100%; height: 64px; margin: 6px 0 4px; }
+.rc .meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.rc .meter i { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
+.rc .legend { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.rc p { font-size: 13px; margin: 6px 0 0; }
+.rc.hot { border-color: var(--good); }
+.rc.hot .chip { background: var(--good); color: var(--card); animation: pulse 1.2s infinite; }
+.rc.hot .meter i { background: var(--good); }
+.rc.watch .chip { background: var(--info-soft); color: var(--info); }
+.rc.watch .meter i { background: var(--info); }
+.rc.mine { border-color: var(--accent); }
+.rc.mine .chip { background: var(--accent-soft); color: var(--accent); }
+.rc.off { opacity: .62; }
+.rc.off .chip { background: var(--warn-soft); color: var(--warn); }
+.how-read { font-size: 13px; color: var(--muted); margin-top: 10px; }
+.how-read span { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; }
+.sw { display: inline-block; width: 18px; height: 0; border-top: 2px dashed var(--good); }
+.sw.band { height: 10px; border: 0; background: var(--accent-soft); }
+.sw.line { border-top: 2px solid var(--ink); }
 @media (max-width: 560px) {
   .choices { grid-template-columns: 1fr; }
   .step-body { margin-left: 0; }
@@ -138,7 +170,11 @@ pre { background: var(--bg); border-radius: 8px; padding: 10px; font: 12px/1.45 
         <button class="choice" id="pickPaper" type="button"><b>Conta paper da Alpaca</b><span>Corretora de verdade com dinheiro fictício. É o teste sério antes de qualquer coisa.</span></button>
       </div>
       <div id="paperBox" class="box hidden">
-        <p id="keysOk" class="msg ok hidden"></p>
+        <div id="keysSaved" class="hidden">
+          <p class="msg ok" id="keysOk"></p>
+          <p class="muted">Elas ficam guardadas no arquivo <code>trade-bot/.env</code> e são usadas toda vez que você abre o painel. Não precisa colar de novo.</p>
+          <div class="row"><button class="btn secondary" id="changeKeys" type="button">Trocar chaves</button></div>
+        </div>
         <div id="keysForm">
           <b>Para o paper você precisa de duas chaves da Alpaca (grátis):</b>
           <ol class="how">
@@ -190,6 +226,12 @@ pre { background: var(--bg); border-radius: 8px; padding: 10px; font: 12px/1.45 
     <div class="step-head"><div class="num"><span>5</span></div><h2>Acompanhar</h2></div>
     <div class="step-body">
       <p id="lastStatus"><b>Ainda sem ciclos.</b> Ligue o robô no passo 4.</p>
+      <h3 style="font-size:15px;margin:16px 0 0">Radar: o que o robô está vigiando agora</h3>
+      <div class="radar-head" id="radarHead">Carregando cotações…</div>
+      <ul class="notes" id="radarNotes"></ul>
+      <div class="radar" id="radar"></div>
+      <p class="how-read"><span><i class="sw"></i>gatilho (máxima dos primeiros 15 min)</span><span><i class="sw band"></i>faixa de abertura</span><span><i class="sw line"></i>preço do dia</span><br>
+        O robô compra quando uma barra de 5 minutos <b>fecha</b> acima do gatilho, dentro da janela de entradas. Se o rompimento passar sem entrada, a ação fica de fora até amanhã. A barra embaixo do gráfico mostra o quanto o preço está perto do gatilho.</p>
       <div class="cards" id="acctCards"></div>
       <p class="msg err" id="acctErr"></p>
       <table id="posTable" class="hidden"><thead><tr><th>Ação</th><th>Qtd</th><th>Preço médio</th><th>Resultado</th></tr></thead><tbody></tbody></table>
@@ -209,7 +251,7 @@ pre { background: var(--bg); border-radius: 8px; padding: 10px; font: 12px/1.45 
 <script>
 const TOKEN = "__PAINEL_TOKEN__";
 const $ = (id) => document.getElementById(id);
-let S = null, pendingMode = null, watchDirty = false;
+let S = null, pendingMode = null, watchDirty = false, changingKeys = false;
 
 async function api(path, body) {
   const opt = { headers: { "X-Painel-Token": TOKEN } };
@@ -238,8 +280,9 @@ function render() {
   $("pickPaper").classList.toggle("on", mode === "paper");
   $("pickSim").disabled = $("pickPaper").disabled = running;
   $("paperBox").classList.toggle("hidden", mode !== "paper");
-  $("keysOk").classList.toggle("hidden", !s.keys.saved);
-  $("keysOk").textContent = s.keys.saved ? "✓ Chaves paper salvas (Key ID " + s.keys.key_hint + "). Para trocar, cole novas abaixo." : "";
+  $("keysSaved").classList.toggle("hidden", !s.keys.saved || changingKeys);
+  $("keysForm").classList.toggle("hidden", s.keys.saved && !changingKeys);
+  $("keysOk").textContent = s.keys.saved ? "✓ Conta paper conectada (Key ID " + s.keys.key_hint + ")." : "";
   const modeOk = (s.mode === "sim") || (s.mode === "paper" && s.keys.saved);
   $("s2").classList.toggle("done", modeOk && !pendingMode);
   if (s.mode !== "sim" && s.mode !== "paper") msg("modeMsg", "O config.json está em modo " + s.mode + ". Escolha sim ou paper acima.");
@@ -320,12 +363,13 @@ $("saveKeys").onclick = async () => {
   const b = $("saveKeys"); b.disabled = true; msg("keysMsg", "Testando com a Alpaca…", true);
   try {
     const r = await api("/api/keys", { key: $("keyId").value, secret: $("keySecret").value });
-    $("keyId").value = ""; $("keySecret").value = "";
+    $("keyId").value = ""; $("keySecret").value = ""; changingKeys = false;
     msg("keysMsg", "Conectado! Conta paper com " + r.equity + ".", true);
     pendingMode = null; await setup("paper");
   } catch (e) { msg("keysMsg", e.message); }
   b.disabled = false;
 };
+$("changeKeys").onclick = () => { changingKeys = true; render(); $("keyId").focus(); };
 $("watch").oninput = () => { watchDirty = true; };
 $("saveWatch").onclick = async () => {
   try {
@@ -355,8 +399,83 @@ $("killBtn").onclick = async () => {
   await refresh();
 };
 
+// ---------------------------------------------------------------- radar (REQ-17)
+const STATE = {
+  sinal: ["rompeu!", "hot", 0], acima: ["acima do gatilho", "hot", 1], posicao: ["comprado", "mine", 2],
+  operou: ["já operou", "mine", 3], vigiando: ["vigiando", "watch", 4], formando: ["marcando faixa", "watch", 5],
+  antes: ["aguardando", "", 6], perdeu: ["rompimento passou", "off", 7], vetado: ["vetado", "off", 7],
+  bloqueado: ["bloqueado", "off", 7], fora: ["fora da janela", "off", 8], sem_dados: ["sem dados", "off", 9],
+};
+let R = null, radarAt = 0;
+const brl = (v) => v == null ? "?" : "US$ " + Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function spark(it, cls) {
+  const W = 300, H = 64, P = 4;
+  const pts = it.closes.map((c, i) => [i, c]).filter((p) => p[1] != null);
+  if (it.price != null) pts.push([it.closes.length, it.price]);
+  if (!pts.length) return "";
+  const ys = pts.map((p) => p[1]).concat([it.or_high, it.or_low].filter((v) => v != null));
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  const pad = (hi - lo) * 0.12 || hi * 0.002 || 1; lo -= pad; hi += pad;
+  const nx = Math.max(it.closes.length, 1);
+  const X = (i) => P + (W - 2 * P) * i / nx, Y = (v) => P + (H - 2 * P) * (hi - v) / (hi - lo);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Preço de ${esc(it.symbol)} hoje">`;
+  if (it.or_high != null) {
+    svg += `<rect x="0" y="${Y(it.or_high)}" width="${W}" height="${Math.max(1, Y(it.or_low) - Y(it.or_high))}" fill="var(--accent-soft)"/>`;
+    svg += `<line x1="0" x2="${W}" y1="${Y(it.or_high)}" y2="${Y(it.or_high)}" stroke="var(--good)" stroke-width="2" stroke-dasharray="6 4" vector-effect="non-scaling-stroke"/>`;
+  }
+  svg += `<polyline points="${pts.map((p) => X(p[0]).toFixed(1) + "," + Y(p[1]).toFixed(1)).join(" ")}" fill="none" stroke="var(--ink)" stroke-width="1.8" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+  const last = pts[pts.length - 1];
+  const dot = cls === "hot" ? "var(--good)" : cls === "mine" ? "var(--accent)" : "var(--info)";
+  svg += `<circle cx="${X(last[0])}" cy="${Y(last[1])}" r="4" fill="${dot}"/>`;
+  return svg + "</svg>";
+}
+
+function renderRadar() {
+  if (!R) return;
+  const head = [];
+  if (R.bar_close_at) head.push(`Próxima decisão: a barra fecha às <b>${esc(R.bar_close_at)}</b> NY <span class="countdown" id="cd"></span>`);
+  else head.push(`Bolsa fechada agora. Entradas entre <b>${esc(R.entries_from)}</b> e <b>${esc(R.entries_to)}</b> NY.`);
+  head.push(`Operações hoje <b>${R.trades}/${R.max_trades}</b>`, `Posições <b>${R.positions}/${R.max_positions}</b>`,
+    `Atualizado ${esc(R.updated)}`);
+  $("radarHead").innerHTML = head.map((h) => `<span>${h}</span>`).join("");
+  $("radarNotes").innerHTML = R.notes.map((n) => `<li>${esc(n)}</li>`).join("");
+  const items = R.items.slice().sort((a, b) => {
+    const sa = (STATE[a.state] || [, , 9])[2], sb = (STATE[b.state] || [, , 9])[2];
+    return sa - sb || (a.dist_pct ?? 99) - (b.dist_pct ?? 99);
+  });
+  $("radar").innerHTML = items.map((it) => {
+    const [label, cls] = STATE[it.state] || [it.state, ""];
+    // 0% de distância = barra cheia; 3% ou mais longe = vazia
+    const near = it.dist_pct == null ? 0 : Math.max(0, Math.min(1, 1 - it.dist_pct / 3));
+    const legend = it.or_high == null ? "" :
+      `<div class="legend"><span>gatilho ${brl(it.or_high)}</span><span>${it.dist_pct == null ? "" : it.dist_pct <= 0 ? "acima" : "falta " + it.dist_pct.toLocaleString("pt-BR") + "%"}</span><span>stop ${brl(it.stop)}</span></div>`;
+    return `<div class="rc ${cls}"><div class="rc-top"><span class="sym">${esc(it.symbol)}</span><span class="chip">${esc(label)}</span>` +
+      `<span class="px">${brl(it.price)}</span></div>${spark(it, cls)}` +
+      (it.or_high == null ? "" : `<div class="meter" title="Quão perto do gatilho"><i style="width:${(near * 100).toFixed(0)}%"></i></div>`) +
+      legend + `<p>${esc(it.text)}</p></div>`;
+  }).join("");
+  tick();
+}
+
+function tick() {
+  const el = $("cd");
+  if (!el || !R || R.bar_close_in == null) return;
+  const left = Math.round(R.bar_close_in - (Date.now() - radarAt) / 1000);
+  el.textContent = left > 0 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "fechando…";
+  if (left === -5) refreshRadar();          // a barra fechou: busca o resultado logo
+}
+
+async function refreshRadar() {
+  try { R = await api("/api/radar"); radarAt = Date.now(); renderRadar(); }
+  catch (e) { $("radarHead").textContent = "Não consegui atualizar o radar: " + e.message; }
+}
+
 refresh();
 setInterval(refresh, 5000);
+refreshRadar();
+setInterval(refreshRadar, 20000);
+setInterval(tick, 1000);
 </script>
 </body>
 </html>
